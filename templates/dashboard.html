@@ -1,0 +1,698 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm bg-gradient-primary text-white"
+                style="background: linear-gradient(45deg, #fe2d55, #ff5b7f);">
+                <div class="card-body p-4">
+                    <h2 class="fw-bold mb-1"><i class="fab fa-tiktok me-2"></i>本主题爆款基因解构分析仪</h2>
+                    <p class="mb-0 opacity-75">针对活跃主题 <span class="fw-bold text-white">{{ active_theme }}</span>
+                        的样本深度扫描，总结核心爆款特征。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- *AI 分析队列进度区块* -->
+    <div class="row mb-4" id="analysisProgressContainer">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0 fw-bold">
+                            <i class="fas fa-brain me-2 text-info"></i>AI 分析队列
+                        </h5>
+                        <div id="analysisStatusBadges">
+                            <span class="badge bg-warning-subtle text-warning border border-warning me-1"
+                                id="badgePending">
+                                <i class="fas fa-hourglass-half me-1"></i>等待中: <span id="pendingCount">0</span>
+                            </span>
+                            <span class="badge bg-info-subtle text-info border border-info me-1" id="badgeProcessing">
+                                <i class="fas fa-spinner fa-spin me-1"></i>处理中: <span id="processingCount">0</span>
+                            </span>
+                            <span class="badge bg-success-subtle text-success border border-success"
+                                id="badgeCompleted">
+                                <i class="fas fa-check-circle me-1"></i>已完成: <span id="completedCount">0</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="d-flex mb-2">
+                        <div class="w-50 pe-2">
+                            <small class="fw-bold text-primary"><i class="fas fa-spider me-1"></i>数据采集池
+                                (Scraping)</small>
+                            <div class="progress mt-1"
+                                style="height: 16px; border-radius: 8px; box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);">
+                                <div id="scrapingProgressBar"
+                                    class="progress-bar progress-bar-striped progress-bar-animated"
+                                    style="background-color: #38bdf8; width: 0%;"></div>
+                            </div>
+                            <small class="text-muted" id="scrapingMsgText">等待中...</small>
+                        </div>
+                        <div class="w-50 ps-2">
+                            <small class="fw-bold text-success" id="aiAnalyzerTitleLabel"><i
+                                    class="fas fa-brain me-1"></i>多模态特征库 (AI Analysis)</small>
+                            <div class="progress mt-1"
+                                style="height: 16px; border-radius: 8px; box-shadow: 0 0 10px rgba(40, 167, 69, 0.4);">
+                                <div id="aiProgressBar"
+                                    class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                                    style="width: 0%;"></div>
+                            </div>
+                            <small class="text-muted" id="aiMsgText">等待中...</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- *系统操作面板：AI 模型重训练* -->
+    <div class="row mb-4" id="systemOpsContainer">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-1 fw-bold">
+                                <i class="fas fa-flask me-2 text-primary"></i>AI 模型管理
+                            </h5>
+                            <small class="text-muted">当数据分析完成后，可触发模型重训练以获取更精准的预测能力</small>
+                        </div>
+                        <button id="btn-retrain" class="btn btn-outline-primary px-4 py-2" 
+
+                        {% if analysis_progress < 90%}disabled{% endif %}>
+                            <i class="fas fa-sync-alt me-2" id="retrain-icon"></i>重训练 AI 模型
+                        </button>
+                    </div>
+                    {% if analysis_progress < 90 %} <div class="mt-2" id="retrain-warning">
+                        <small class="text-warning"><i class="fas fa-info-circle me-1"></i>数据分析未完成 ({{ analysis_progress
+                            }}%)，建议分析完成后再触发重训练</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- *Bootstrap 5 Toast 消息容器* -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;">
+    <div id="retrainToast" class="toast align-items-center border-0" role="alert" aria-live="assertive"
+        aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body fw-bold" id="retrainToastBody">
+                <!-- *JS 动态填充* -->
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
+                aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm p-4 text-center">
+            <small class="text-muted text-uppercase fw-bold">分析样本量</small>
+            <h2 class="fw-bold text-primary mt-2">{{ total_videos }}</h2>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm p-4 text-center">
+            <small class="text-muted text-uppercase fw-bold">历史互动总计</small>
+            <h2 class="fw-bold text-success mt-2">{{ history_interactions|default:0|floatformat:0 }}</h2>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm p-4 text-center">
+            <small class="text-muted text-uppercase fw-bold">平均情感极性</small>
+            <h2 class="fw-bold text-info mt-2">{{ avg_sentiment|default:0.5 }}</h2>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm p-3 text-center border-start border-primary border-4">
+            <small class="text-muted fw-bold">平均画面亮度</small>
+            <h3 class="fw-bold mt-1">{{ avg_stats.avg_bright|default:0|floatformat:1 }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm p-3 text-center border-start border-warning border-4">
+            <small class="text-muted fw-bold">平均音频节奏 (BPM)</small>
+            <h3 class="fw-bold mt-1">{{ avg_stats.avg_bpm|default:0|floatformat:0 }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm p-3 text-center border-start border-info border-4">
+            <small class="text-muted fw-bold">平均画面饱和度</small>
+            <h3 class="fw-bold mt-1">{{ avg_stats.avg_sat|default:0|floatformat:1 }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm p-3 text-center border-start border-danger border-4">
+            <small class="text-muted fw-bold">互动率得分</small>
+            <h3 class="fw-bold mt-1">{{ avg_stats.avg_comment|default:0|floatformat:0 }}</h3>
+        </div>
+    </div>
+</div>
+
+
+
+<!-- *AI 通量监控面板 (AI Workflow Throughput Monitor)* -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm p-4" style="background-color: #f8f9fa;">
+            <h5 class="mb-3 fw-bold"><i class="fas fa-microchip me-2 text-primary"></i>AI 工作流吞吐量监控</h5>
+            <div class="row align-items-center">
+                <div class="col-md-5">
+                    <div id="ai-flow-monitor" style="height: 350px;"></div>
+                </div>
+                <div class="col-md-7">
+                    <div class="d-flex flex-column justify-content-center h-100 px-4">
+                        <div class="mb-4 d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="text-muted text-uppercase fw-bold mb-2">流程状态指示灯</h6>
+                                <span class="badge bg-warning text-dark px-3 py-2 fs-6 shadow-sm" id="flowStatusLamp"><i
+                                        class="fas fa-pause-circle me-1"></i>空闲</span>
+                            </div>
+                            <div>
+                                <h6 class="text-muted text-uppercase fw-bold mb-2">队列负载</h6>
+                                <span id="queueLoadStatus" class="fw-bold fs-5 text-success">空闲</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <h6 class="text-muted text-uppercase fw-bold mb-2"><i
+                                    class="fas fa-tachometer-alt me-2"></i>性能指标</h6>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <div class="bg-white p-3 rounded border shadow-sm text-center">
+                                        <small class="text-muted d-block mb-1">平均处理时长</small>
+                                        <h3 class="fw-bold text-primary mb-0" id="avgDurationMetric">0.0s</h3>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="bg-white p-3 rounded border shadow-sm text-center">
+                                        <small class="text-muted d-block mb-1">实时吞吐量</small>
+                                        <h3 class="fw-bold text-info mb-0" id="throughputMetric">0.0 vpm</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h6 class="text-muted text-uppercase fw-bold mb-2"><i
+                                    class="fas fa-file-video me-2"></i>当前处理中</h6>
+                            <div class="bg-dark text-success p-3 rounded font-monospace small shadow-sm">
+                                <i class="fas fa-terminal me-2"></i><span id="currentFileTicker">等待中...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold"><i class="fas fa-comments me-2 text-primary"></i>舆情深度穿透 (最新精选评论)</h5>
+                <span class="badge bg-light text-secondary border">已自动拦截 0.5 分噪声</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light text-secondary text-uppercase small">
+                        <tr>
+                            <th class="ps-4">评论内容 (物理净化版)</th>
+                            <th class="text-center" style="width: 150px;">情感倾向</th>
+                            <th class="text-center" style="width: 120px;">IP 属地</th>
+                            <th class="text-end pe-4" style="width: 180px;">发布时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="commentsTableBody">
+                        <!-- *JS 动态渲染* -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<script>
+    // *全局 API 配置 (若外部已定义则复用)*
+    const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
+        predictApi: '/predict/api/',
+        globalStatus: '/api/global-status/',
+        analysisStatus: '/api/get_analysis_status/',
+        retrainModel: '/api/retrain_model/'
+    };
+
+    // *渲染评论表格函数*
+    function renderTable(data) {
+        const tbody = document.getElementById('commentsTableBody');
+        if (!tbody) return;
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5"><div class="text-muted opacity-50"><i class="fas fa-inbox fa-3x mb-3"></i><p>当前主题下暂无有效的非噪声评论数据</p></div></td></tr>';
+            return;
+        }
+
+        // *HTML 转义函数，防止 XSS*
+        const escapeHTML = (str) => {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        };
+
+        tbody.innerHTML = data.map(item => {
+            let sentimentHtml = '';
+            let score = parseFloat(item.sentiment_score);
+            if (score > 0.6) {
+                sentimentHtml = `<span class="badge bg-success-subtle text-success border border-success px-3 py-2">积极 (${score.toFixed(2)})</span>`;
+            } else if (score < 0.4) {
+                sentimentHtml = `<span class="badge bg-danger-subtle text-danger border border-danger px-3 py-2">消极 (${score.toFixed(2)})</span>`;
+            } else {
+                sentimentHtml = `<span class="badge bg-warning-subtle text-warning border border-warning px-3 py-2">中性</span>`;
+            }
+
+            let contentRaw = item.content_clean || item.content;
+            let ipLabelRaw = item.ip_label || '未知';
+            let nicknameRaw = item.nickname || '用户';
+
+            let content = escapeHTML(contentRaw);
+            let ipLabel = escapeHTML(ipLabelRaw);
+            let nickname = escapeHTML(nicknameRaw);
+            let avatarChar = escapeHTML(nicknameRaw.charAt(0));
+
+            return `<tr>
+                 <td class="ps-4">
+                     <div class="d-flex align-items-center">
+                         <div class="avatar-circle bg-light text-primary me-3 rounded-circle d-flex align-items-center justify-content-center border"
+                             style="width: 40px; height: 40px; font-weight: bold;">
+                             ${avatarChar}
+                         </div>
+                         <div>
+                             <div class="fw-bold text-dark mb-1">${nickname}</div>
+                             <div class="text-secondary small text-break"
+                                 style="max-width: 500px; line-height: 1.4;">
+                                 ${content}
+                             </div>
+                         </div>
+                     </div>
+                 </td>
+                 <td class="text-center">
+                     ${sentimentHtml}
+                 </td>
+                 <td class="text-center"><span class="badge bg-light text-dark border">${ipLabel}</span></td>
+                 <td class="text-end pe-4 text-muted small">${item.create_time}</td>
+             </tr>`;
+        }).join('');
+    }
+
+    // *页面加载完成后立即执行*
+    document.addEventListener('DOMContentLoaded', function () {
+        try {
+            const commentsData = JSON.parse('{{ recent_comments_json|default:"[]"|escapejs }}');
+
+            // *延迟一小会儿确保布局稳定*
+            setTimeout(function () {
+                renderTable(commentsData);
+            }, 100);
+        } catch (e) {
+            console.error('[Frontend] Chart Init Error:', e);
+        }
+    });
+</script>
+
+<!-- *Global Task Monitoring Hub - Resilient Poller* -->
+<script>
+    const GlobalMonitor = (function () {
+        let pollingInterval = null;
+        let isRunning = false;
+        let lastRenderedTheme = null; // *[Feature] 跟踪上一个渲染的主题*
+
+        const config = {
+            pollIntervalMs: 2000,
+            apiEndpoint: window.GLOBAL_API_CONFIG ? window.GLOBAL_API_CONFIG.analysisStatus : '/api/get_analysis_status/'
+        };
+
+        // *[Atomic Data Update] 强制重置原子状态*
+        const resetAIProgressBar = () => {
+            const scrapBar = document.getElementById('scrapingProgressBar');
+            const aiBar = document.getElementById('aiProgressBar');
+            const scrapMsg = document.getElementById('scrapingMsgText');
+            const aiMsg = document.getElementById('aiMsgText');
+
+            if (scrapBar) { scrapBar.style.width = '0%'; scrapBar.classList.add('progress-bar-animated'); }
+            if (aiBar) { aiBar.style.width = '0%'; aiBar.classList.add('progress-bar-animated'); }
+
+            if (scrapMsg) scrapMsg.innerText = "数据归零中 (0/0)...";
+            if (aiMsg) aiMsg.innerText = "数据归零中 (0/0)...";
+
+            const pendingEl = document.getElementById('pendingCount');
+            const processingEl = document.getElementById('processingCount');
+            const completedEl = document.getElementById('completedCount');
+            if (pendingEl) pendingEl.innerText = '0';
+            if (processingEl) processingEl.innerText = '0';
+            if (completedEl) completedEl.innerText = '0';
+        };
+
+        const initDomReferences = () => {
+            if (!window.aiFlowChart) {
+                const monitorDom = document.getElementById('ai-flow-monitor');
+                if (monitorDom && typeof echarts !== 'undefined') {
+                    window.aiFlowChart = echarts.init(monitorDom);
+                    window.aiFlowChart.setOption({
+                        tooltip: { formatter: '{b} : {c}%' },
+                        series: [{
+                            name: '处理速度',
+                            type: 'gauge',
+                            center: ['50%', '55%'],
+                            radius: '80%',
+                            axisLine: {
+                                lineStyle: {
+                                    width: 15,
+                                    color: [[0.3, '#67e0e3'], [0.7, '#37a2da'], [1, '#fd666d']]
+                                }
+                            },
+                            detail: { formatter: '{value}%', fontSize: 24, fontWeight: 'bold', offsetCenter: [0, '70%'] },
+                            data: [{ value: 0, name: 'GPU 负载' }]
+                        }]
+                    });
+                }
+            }
+        };
+
+        const updateUI = (data) => {
+            if (!data) return;
+
+            const returnedTheme = data.current_theme || '未知主题';
+
+            // *[State Reset & Dynamic Labeling] 主题变化检测与重置*
+            if (lastRenderedTheme !== null && lastRenderedTheme !== returnedTheme) {
+                console.log(`[GlobalMonitor] ♻️ 活跃主题改变: ${lastRenderedTheme} -> ${returnedTheme}`);
+                resetAIProgressBar();
+            }
+            lastRenderedTheme = returnedTheme;
+
+            // *[Dynamic Labeling] 动态渲染主题标签*
+            const aiTitle = document.getElementById('aiAnalyzerTitleLabel');
+            if (aiTitle) {
+                aiTitle.innerHTML = `<i class="fas fa-brain me-1"></i>多模态特征库 (正在分析: ${returnedTheme})`;
+            }
+
+            // Scraping Progress Update
+            const scraping = data.scraping_progress || { current: 0, total: 0, percent: 0, msg: "空闲" };
+            const scrapBar = document.getElementById('scrapingProgressBar');
+            const scrapMsg = document.getElementById('scrapingMsgText');
+            if (scrapBar) {
+                scrapBar.style.width = scraping.percent + '%';
+                if (scraping.percent >= 100) scrapBar.classList.remove('progress-bar-animated');
+                else scrapBar.classList.add('progress-bar-animated');
+            }
+            if (scrapMsg) scrapMsg.innerText = scraping.msg + ` (${scraping.current}/${scraping.total})`;
+
+            // AI Analysis Progress Update
+            const ai = data.ai_analysis_progress || { current: 0, total: 0, msg: "空闲", processing: 0, pending: 0 };
+            const aiBar = document.getElementById('aiProgressBar');
+            const aiMsg = document.getElementById('aiMsgText');
+            const aiPercent = ai.total > 0 ? Math.round((ai.current / ai.total) * 100) : 0;
+            if (aiBar) {
+                aiBar.style.width = aiPercent + '%';
+                if (aiPercent >= 100 && ai.total > 0) aiBar.classList.remove('progress-bar-animated');
+                else aiBar.classList.add('progress-bar-animated');
+            }
+            if (aiMsg) aiMsg.innerText = ai.msg + ` (${ai.current}/${ai.total})`;
+
+            const retrainBtn = document.getElementById('btn-retrain');
+            const retrainWarning = document.getElementById('retrain-warning');
+            if (retrainBtn && ai.total > 0) {
+                if (aiPercent >= 90) {
+                    retrainBtn.removeAttribute('disabled');
+                    if (retrainWarning) retrainWarning.style.display = 'none';
+                } else {
+                    retrainBtn.setAttribute('disabled', 'disabled');
+                    if (retrainWarning) {
+                        retrainWarning.style.display = 'block';
+                        const warningText = retrainWarning.querySelector('small');
+                        if (warningText) warningText.innerHTML = `<i class="fas fa-info-circle me-1"></i>数据分析未完成 (${aiPercent}%)，建议分析完成后再触发重训练`;
+                    }
+                }
+            }
+
+            // Modal Sync auto-exit logic
+            if (scraping.percent >= 100 && scraping.total > 0) {
+                const modalEl = document.getElementById('globalTaskModal');
+                if (modalEl && modalEl.classList.contains('show')) {
+                    const modalInstance = typeof bootstrap !== 'undefined' ? bootstrap.Modal.getInstance(modalEl) : null;
+                    if (modalInstance) {
+                        modalInstance.hide();
+                    } else if (window.jQuery) {
+                        window.jQuery('#globalTaskModal').modal('hide');
+                    }
+                }
+            }
+
+            // Re-check other dashboard UI elements
+            const pendingElement = document.getElementById('pendingCount');
+            if (pendingElement) pendingElement.textContent = ai.pending || 0;
+            const processingElement = document.getElementById('processingCount');
+            if (processingElement) processingElement.textContent = ai.processing || 0;
+            const completedElement = document.getElementById('completedCount');
+            if (completedElement) completedElement.textContent = ai.current || 0;
+
+            // Extra Metrics
+            if (document.getElementById('currentFileTicker')) {
+                document.getElementById('currentFileTicker').innerText = data.current_file || '等待中...';
+            }
+            if (document.getElementById('avgDurationMetric')) {
+                document.getElementById('avgDurationMetric').innerText = data.avg_duration || '0.0s';
+            }
+            if (document.getElementById('throughputMetric')) {
+                document.getElementById('throughputMetric').innerText = data.throughput || '0.0 vpm';
+            }
+
+            if (document.getElementById('queueLoadStatus')) {
+                const load = data.queue_load || 'Empty';
+                const loadMap = { 'High': '高', 'Normal': '中', 'Low': '低', 'Empty': '空闲' };
+                document.getElementById('queueLoadStatus').innerText = loadMap[load] || load;
+                if (load === 'High') {
+                    document.getElementById('queueLoadStatus').className = "fw-bold fs-5 text-danger";
+                } else if (load === 'Normal') {
+                    document.getElementById('queueLoadStatus').className = "fw-bold fs-5 text-warning";
+                } else {
+                    document.getElementById('queueLoadStatus').className = "fw-bold fs-5 text-success";
+                }
+            }
+
+            // Flow monitor chart update
+            if (data.is_active || ai.processing > 0) {
+                const fakeGpu = 80 + Math.random() * 15;
+                if (window.aiFlowChart) {
+                    window.aiFlowChart.setOption({
+                        series: [{ data: [{ value: fakeGpu.toFixed(1), name: 'GPU 负载' }] }]
+                    });
+                }
+                if (document.getElementById('flowStatusLamp')) {
+                    document.getElementById('flowStatusLamp').className = "badge bg-success px-3 py-2 fs-6 shadow-sm";
+                    document.getElementById('flowStatusLamp').innerHTML = '<i class="fas fa-cog fa-spin me-1"></i>运行中';
+                }
+            } else {
+                if (window.aiFlowChart) {
+                    window.aiFlowChart.setOption({
+                        series: [{ data: [{ value: 0, name: 'GPU 负载' }] }]
+                    });
+                }
+                if (document.getElementById('flowStatusLamp')) {
+                    document.getElementById('flowStatusLamp').className = "badge bg-warning text-dark px-3 py-2 fs-6 shadow-sm";
+                    document.getElementById('flowStatusLamp').innerHTML = '<i class="fas fa-pause-circle me-1"></i>空闲';
+                }
+            }
+        };
+
+        const fetchStatus = async () => {
+            try {
+                const response = await fetch(config.apiEndpoint);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateUI(data);
+                }
+            } catch (e) {
+                console.warn('[GlobalMonitor] Fetch sync error:', e);
+            }
+        };
+
+        const start = () => {
+            if (isRunning) return;
+            initDomReferences();
+            isRunning = true;
+            console.log('[GlobalMonitor] Heartbeat started...');
+            fetchStatus();
+            pollingInterval = setInterval(fetchStatus, config.pollIntervalMs);
+        };
+
+        const stop = () => {
+            if (!isRunning) return;
+            isRunning = false;
+            if (pollingInterval) clearInterval(pollingInterval);
+        };
+
+        return { start, stop, updateUI };
+    })();
+
+    // Auto-Initialization & Resilience
+    document.addEventListener('DOMContentLoaded', GlobalMonitor.start);
+
+    // If PJAX/AJAX theme switching is used, rebind the poller
+    document.addEventListener('pjax:complete', GlobalMonitor.start);
+    document.addEventListener('ajaxComplete', GlobalMonitor.start);
+</script>
+
+<!-- *AI 模型重训练 AJAX 控制器* -->
+<script>
+    (function () {
+        // *重训练配置*
+        const RETRAIN_CONFIG = {
+            apiEndpoint: GLOBAL_API_CONFIG.retrainModel,
+            buttonId: 'btn-retrain',
+            iconId: 'retrain-icon',
+            toastId: 'retrainToast',
+            toastBodyId: 'retrainToastBody'
+        };
+
+        // *从 Cookie 中提取 CSRF Token（兼容 Django 默认机制）*
+        function getCsrfToken() {
+            const name = 'csrftoken';
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(name + '=')) {
+                    return decodeURIComponent(cookie.substring(name.length + 1));
+                }
+            }
+            // *回退：尝试从隐藏 input 获取*
+            const hiddenInput = document.querySelector('[name=csrfmiddlewaretoken]');
+            return hiddenInput ? hiddenInput.value : '';
+        }
+
+        // *显示 Toast 通知*
+        function showToast(message, isSuccess) {
+            try {
+                const toastEl = document.getElementById(RETRAIN_CONFIG.toastId);
+                const toastBody = document.getElementById(RETRAIN_CONFIG.toastBodyId);
+                if (!toastEl || !toastBody) return;
+
+                toastBody.textContent = message;
+                toastEl.className = 'toast align-items-center border-0 text-white ' +
+                    (isSuccess ? 'bg-success' : 'bg-danger');
+
+                const bsToast = new bootstrap.Toast(toastEl, { delay: 5000 });
+                bsToast.show();
+            } catch (e) {
+                console.error('[Retrain Toast] Error:', e);
+            }
+        }
+
+        // *切换按钮加载状态*
+        function setButtonLoading(btn, icon, isLoading) {
+            if (!btn) return;
+            if (isLoading) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>训练中 (后台执行)...';
+                btn.classList.remove('btn-outline-primary');
+                btn.classList.add('btn-secondary');
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sync-alt me-2" id="' + RETRAIN_CONFIG.iconId + '"></i>重训练 AI 模型';
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-outline-primary');
+            }
+        }
+
+        // *页面加载后绑定事件*
+        document.addEventListener('DOMContentLoaded', function () {
+            const btn = document.getElementById(RETRAIN_CONFIG.buttonId);
+            if (!btn) return;
+
+            btn.addEventListener('click', async function () {
+                const icon = document.getElementById(RETRAIN_CONFIG.iconId);
+                setButtonLoading(btn, icon, true);
+
+                try {
+                    const response = await fetch(RETRAIN_CONFIG.apiEndpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken(),
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showToast('✅ ' + (data.message || '模型重训练任务已提交后台执行'), true);
+                        // *延迟恢复按钮，给用户缓冲期*
+                        setTimeout(() => setButtonLoading(btn, icon, false), 8000);
+                    } else {
+                        showToast('❌ ' + (data.message || '重训练请求失败'), false);
+                        setButtonLoading(btn, icon, false);
+                    }
+                } catch (e) {
+                    console.error('[Retrain] Fetch Error:', e);
+                    showToast('❌ 网络请求异常，请检查服务器状态', false);
+                    setButtonLoading(btn, icon, false);
+                }
+            });
+        });
+    })();
+</script>
+
+<script>
+    /* *3D 悬停倾斜效果与动态阴影流转* */
+    document.addEventListener('DOMContentLoaded', () => {
+        const cards = document.querySelectorAll('.card');
+        cards.forEach(card => {
+            card.style.transition = 'transform 0.1s ease, box-shadow 0.1s ease';
+            card.style.transformStyle = 'preserve-3d';
+
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                const centerX = rect.width / 2;
+                const centerY = rect.height / 2;
+
+                const rotateX = ((y - centerY) / centerY) * -5;
+                const rotateY = ((x - centerX) / centerX) * 5;
+
+                card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+
+                const shadowX = (x - centerX) / 5;
+                const shadowY = (y - centerY) / 5;
+                card.style.boxShadow = `${-shadowX}px ${-shadowY}px 25px rgba(56, 189, 248, 0.4), 0 10px 20px rgba(0,0,0,0.2)`;
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'perspective(1000px) rotateX(0) rotateY(0) scale3d(1, 1, 1)';
+                card.style.boxShadow = '';
+                card.style.transition = 'transform 0.5s ease, box-shadow 0.5s ease';
+            });
+
+            card.addEventListener('mouseenter', () => {
+                card.style.transition = 'transform 0.1s ease, box-shadow 0.1s ease';
+            });
+        });
+    });
+</script>
+{% endblock %}

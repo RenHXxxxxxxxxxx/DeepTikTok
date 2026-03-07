@@ -1,0 +1,424 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm bg-gradient-primary text-white"
+                style="background: linear-gradient(45deg, #fe2d55, #ff5b7f);">
+                <div class="card-body p-4">
+                    <h2 class="fw-bold mb-1"><i class="fab fa-tiktok me-2"></i>多模态爆款预测工作台</h2>
+                    <p class="mb-0 opacity-75">提取视频多维特征，结合账号数据进行深度推理。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-layer-group text-primary me-2"></i>数据采集与上传</h5>
+                </div>
+                <div class="card-body p-4">
+                    <form id="multiModalForm">
+                        <div id="dropZone"
+                            class="border border-2 border-dashed rounded-4 p-5 text-center mb-4 transition-all"
+                            style="cursor: pointer; border-color: #dee2e6 !important;">
+                            <input type="file" id="videoInput" accept="video/*" class="d-none">
+                            <div id="uploadPrompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                                <h5>点击或拖拽视频至此处进行多模态分析</h5>
+                                <p class="text-muted small">系统将自动解析：亮度、饱和度、BPM 及转场频率</p>
+                            </div>
+                            <div id="videoPreviewContainer" class="d-none">
+                                <video id="previewVideo" class="img-fluid rounded-3 mb-3" controls
+                                    style="max-height: 250px;"></video>
+                                <div class="d-flex justify-content-center">
+                                    <button type="button" class="btn btn-sm btn-outline-danger"
+                                        id="reUploadBtn">更换视频源</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">当前粉丝总量</label>
+                                <input type="number" class="form-control" name="follower_count" id="follower"
+                                    value="10000">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold text-muted">拟发布时间 (24h制)</label>
+                                <select class="form-select" name="publish_hour" id="publishHourSelect"></select>
+                            </div>
+                            <div class="col-12 mt-2">
+                                <label class="form-label small fw-bold text-muted">目标赛道 (Target Theme)</label>
+                                <select class="form-select" name="theme_name" id="themeSelect">
+                                    {% for theme in themes_list %}
+                                    <option value="{{ theme }}" {% if theme == active_theme %}selected{% endif %}>
+                                        {{ theme }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-light rounded-3 mt-4 mb-3">
+                            <h6 class="text-primary small fw-bold mb-3">历史平均互动数据 (可选)</h6>
+                            <div class="row g-2">
+                                <div class="col-4">
+                                    <label class="form-label small">平均评论</label>
+                                    <input type="number" class="form-control form-control-sm" name="avg_comment"
+                                        value="50">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small">平均收藏</label>
+                                    <input type="number" class="form-control form-control-sm" name="avg_collect"
+                                        value="100">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small">平均分享</label>
+                                    <input type="number" class="form-control form-control-sm" name="avg_share"
+                                        value="20">
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 py-3 fw-bold mt-2" id="analyzeBtn">
+                            <i class="fas fa-rocket me-2"></i>开始多模态爆款预测
+                        </button>
+                    </form>
+
+                    <div id="progressContainer" class="mt-4 d-none">
+                        <div class="d-flex justify-content-between mb-2 small fw-bold">
+                            <span id="statusText" class="text-primary">准备上传...</span>
+                            <span id="percentText">0%</span>
+                        </div>
+                        <div class="progress" style="height: 12px; border-radius: 6px;">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                role="progressbar" style="background-color: #fe2d55;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm h-100 bg-white" id="resultCard">
+                <div class="card-body p-4 d-flex flex-column justify-content-center align-items-center text-center">
+                    <div id="resultPlaceholder">
+                        <img src="https://cdn-icons-png.flaticon.com/512/1541/1541400.png"
+                            style="width: 100px; opacity: 0.2;" class="mb-3">
+                        <h6 class="text-muted">等待 AI 专家生成报告...<br><small>系统将同步解析视觉与音频信号</small></h6>
+                    </div>
+
+                    <div id="resultContent" class="d-none w-100 text-start">
+                        <div class="text-center mb-4">
+                            <h5 class="text-uppercase text-muted letter-spacing-2 mb-3">PREDICTION RESULT</h5>
+                            <div class="p-4 rounded-4"
+                                style="background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border: 1px solid #fe2d5522;">
+                                <small class="text-muted d-block mb-2">预计点赞数</small>
+                                <h1 class="display-3 fw-bold text-dark mb-0" id="predictedLikes">-</h1>
+                                <div class="mt-3 d-flex justify-content-center align-items-center gap-2">
+                                    <span
+                                        class="badge bg-success bg-opacity-10 text-success px-4 py-2 rounded-pill border border-success border-opacity-25"
+                                        id="qualityBadge">
+                                        <i class="fas fa-chart-line me-2"></i>质量评分: <span id="scoreVal"
+                                            class="fw-bold">--</span>
+                                    </span>
+                                </div>
+                                <div class="mt-3 text-center">
+                                    <h5 class="fw-bold text-primary mb-1" id="percentileRank"></h5>
+                                    <div class="small text-muted" id="baselineInfo"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h6 class="fw-bold mb-3"><i class="fas fa-magic text-success me-2"></i>AI 运营参谋建议：</h6>
+                        <div class="p-3 bg-light rounded-3 border-0 small text-secondary shadow-inner" id="aiAdvice"
+                            style="min-height: 180px; white-space: pre-wrap; line-height: 1.6;">
+                            正在生成策略...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    #dropZone {
+        transition: all 0.3s ease;
+    }
+
+    #dropZone:hover,
+    #dropZone.dragover {
+        background-color: #fff5f7;
+        border-color: #fe2d55 !important;
+    }
+
+    .shadow-inner {
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .letter-spacing-2 {
+        letter-spacing: 2px;
+    }
+</style>
+
+<script>
+    // *全局 API 配置 (若外部已定义则复用)*
+    const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
+        predictApi: '/predict/api/',
+        globalStatus: '/api/global-status/',
+        analysisStatus: '/api/get_analysis_status/'
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // 1. 初始化下拉框
+        const hourSelect = document.getElementById('publishHourSelect');
+        for (let i = 0; i < 24; i++) {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.innerHTML = i + ':00';
+            if (i === 18) opt.selected = true;
+            hourSelect.appendChild(opt);
+        }
+
+        // 2. 视频交互逻辑
+        const dropZone = document.getElementById('dropZone');
+        const videoInput = document.getElementById('videoInput');
+        const multiModalForm = document.getElementById('multiModalForm');
+        const previewVideo = document.getElementById('previewVideo');
+
+        dropZone.onclick = () => videoInput.click();
+        videoInput.onchange = (e) => handleFile(e.target.files[0]);
+
+        function handleFile(file) {
+            if (!file || !file.type.startsWith('video/')) return;
+            document.getElementById('uploadPrompt').classList.add('d-none');
+            document.getElementById('videoPreviewContainer').classList.remove('d-none');
+            previewVideo.src = URL.createObjectURL(file);
+        }
+
+        document.getElementById('reUploadBtn').onclick = (e) => {
+            e.stopPropagation();
+            videoInput.value = '';
+            document.getElementById('uploadPrompt').classList.remove('d-none');
+            document.getElementById('videoPreviewContainer').classList.add('d-none');
+        };
+
+        // 3. 核心异步预测逻辑 (带双阶段进度条)
+        let analysisInterval = null;
+
+        // *非阻塞通知提示*
+        function showNotification(msg) {
+            const toastId = 'toast-' + Date.now();
+            const html = `
+            <div id="${toastId}" class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 1080; margin-top: 20px;">
+                <div class="toast show align-items-center text-white bg-danger border-0 shadow-lg rounded-3" role="alert">
+                    <div class="d-flex px-2 py-1">
+                        <div class="toast-body fw-bold"><i class="fas fa-exclamation-circle me-2"></i>${msg}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="document.getElementById('${toastId}').remove()"></button>
+                    </div>
+                </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', html);
+            setTimeout(() => {
+                const el = document.getElementById(toastId);
+                if (el) el.remove();
+            }, 3000);
+        }
+
+        multiModalForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const file = videoInput.files[0];
+            if (!file) { showNotification('请先上传样片视频以供多模态分析'); return; }
+
+            const formData = new FormData(multiModalForm);
+            formData.append('video_file', file);
+
+            // UI 状态切换
+            document.getElementById('progressContainer').classList.remove('d-none');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            analyzeBtn.disabled = true;
+            const progressBar = document.getElementById('progressBar');
+            const statusText = document.getElementById('statusText');
+            const percentText = document.getElementById('percentText');
+
+            const xhr = new XMLHttpRequest();
+
+            // 【阶段 1】：物理上传进度 (映射至 0% - 40%)
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const uploadPercent = Math.round((event.loaded / event.total) * 40);
+                    progressBar.style.width = uploadPercent + '%';
+                    percentText.innerText = uploadPercent + '%';
+                    statusText.innerText = `正在传输视频二进制流... (${uploadPercent}%)`;
+                }
+            };
+
+            xhr.onload = function () {
+                // 收到后端结果，清除模拟定时器并拉满进度
+                if (analysisInterval) clearInterval(analysisInterval);
+
+                if (xhr.status === 200) {
+                    const res = JSON.parse(xhr.responseText);
+                    progressBar.style.width = '100%';
+                    percentText.innerText = '100%';
+                    statusText.innerText = '分析完成，正在渲染结果...';
+
+                    setTimeout(() => {
+                        document.getElementById('resultPlaceholder').classList.add('d-none');
+                        document.getElementById('resultContent').classList.remove('d-none');
+                        document.getElementById('resultContent').classList.remove('d-none');
+                        document.getElementById('predictedLikes').innerText = res.predicted_likes;
+
+                        // *更新质量分与样式*
+                        const score = res.quality_score || 0;
+                        document.getElementById('scoreVal').innerText = score;
+                        const badge = document.getElementById('qualityBadge');
+                        if (score >= 80) {
+                            badge.className = 'badge bg-success bg-opacity-10 text-success px-4 py-2 rounded-pill border border-success border-opacity-25';
+                            badge.querySelector('i').className = 'fas fa-fire me-2';
+                        } else if (score >= 60) {
+                            badge.className = 'badge bg-warning bg-opacity-10 text-warning px-4 py-2 rounded-pill border border-warning border-opacity-25';
+                            badge.querySelector('i').className = 'fas fa-chart-line me-2';
+                        } else {
+                            badge.className = 'badge bg-danger bg-opacity-10 text-danger px-4 py-2 rounded-pill border border-danger border-opacity-25';
+                            badge.querySelector('i').className = 'fas fa-exclamation-circle me-2';
+                        }
+
+                        // *更新排名文案*
+                        document.getElementById('percentileRank').innerText = res.percentile_rank || '';
+
+                        // *更新基准对比信息*
+                        if (res.baseline_info && res.baseline_info.p50) {
+                            document.getElementById('baselineInfo').innerHTML =
+                                `赛道中位数: <strong>${parseInt(res.baseline_info.p50).toLocaleString()}</strong> | ` +
+                                `最高值: <strong>${parseInt(res.baseline_info.max).toLocaleString()}</strong>`;
+                        } else {
+                            document.getElementById('baselineInfo').innerHTML = '<span class="text-muted fst-italic">暂无赛道基准数据</span>';
+                        }
+
+                        // *处理警告信息 (Toast 通知)*
+                        if (res.warning) {
+                            const toastHtml = `
+                        <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1080">
+                            <div class="toast show align-items-center text-white bg-warning border-0" role="alert">
+                                <div class="d-flex">
+                                    <div class="toast-body"><i class="fas fa-exclamation-triangle me-2"></i>${res.warning}</div>
+                                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" onclick="this.closest('.toast').remove()"></button>
+                                </div>
+                            </div>
+                        </div>`;
+                            document.body.insertAdjacentHTML('beforeend', toastHtml);
+                            setTimeout(() => {
+                                const toasts = document.querySelectorAll('.toast');
+                                toasts.forEach(t => t.remove());
+                            }, 5000);
+                        }
+
+                        // 核心修复点：使用 'res.advice' 接收后端 Response
+                        if (res.advice) {
+                            typeWriter(res.advice, document.getElementById('aiAdvice'));
+                        } else {
+                            document.getElementById('aiAdvice').innerText = "AI 服务由于高并发未能生成诊断建议，请点击下方按钮重新预测。";
+                        }
+
+                        document.getElementById('progressContainer').classList.add('d-none');
+                        analyzeBtn.disabled = false;
+                    }, 600);
+                } else {
+                    showNotification('多模态分析链路异常，请检查 RTX 3060 驱动状态');
+                    analyzeBtn.disabled = false;
+                    if (analysisInterval) clearInterval(analysisInterval);
+                }
+            };
+
+            xhr.onerror = function () {
+                showNotification('网络连接错误，请检查网络设置');
+                analyzeBtn.disabled = false;
+                if (analysisInterval) clearInterval(analysisInterval);
+            };
+
+            // 发送请求 (确保 URL 与 urls.py 匹配)
+            xhr.open('POST', GLOBAL_API_CONFIG.predictApi, true);
+            xhr.setRequestHeader('X-CSRFToken', '{{ csrf_token }}');
+            xhr.send(formData);
+
+            // 【阶段 2】：AI 分析模拟爬升 (从 40% 慢速蠕动到 95%)
+            let simulatedPercent = 40;
+            analysisInterval = setInterval(() => {
+                if (simulatedPercent < 95) {
+                    // 每次增加 1-2%，模拟 CV 特征提取的计算耗时
+                    simulatedPercent += Math.random() * 1.5;
+                    const displayPercent = Math.floor(simulatedPercent);
+                    progressBar.style.width = displayPercent + '%';
+                    percentText.innerText = displayPercent + '%';
+
+                    // 动态切换话术，增加真实感
+                    if (displayPercent < 55) statusText.innerText = '正在并行提取视觉物理特征...';
+                    else if (displayPercent < 75) statusText.innerText = 'Librosa 正在解析音频 BPM 与采样频率...';
+                    else if (displayPercent < 90) statusText.innerText = 'AI 模型正在执行多模态融合特征预测...';
+                    else statusText.innerText = '百度千帆大模型正在生成针对性运营诊断...';
+                }
+            }, 600);
+        };
+
+        // 打字机效果
+        function typeWriter(text, element) {
+            element.innerHTML = "";
+            let i = 0;
+            function type() {
+                if (i < text.length) {
+                    element.innerHTML += text.charAt(i);
+                    i++;
+                    setTimeout(type, 20);
+                }
+            }
+            type();
+        }
+    });
+</script>
+
+<script>
+    /* *3D 悬停倾斜效果与动态阴影流转* */
+    document.addEventListener('DOMContentLoaded', () => {
+        const cards = document.querySelectorAll('.card');
+        cards.forEach(card => {
+            card.style.transition = 'transform 0.1s ease, box-shadow 0.1s ease';
+            card.style.transformStyle = 'preserve-3d';
+
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                const centerX = rect.width / 2;
+                const centerY = rect.height / 2;
+
+                const rotateX = ((y - centerY) / centerY) * -5;
+                const rotateY = ((x - centerX) / centerX) * 5;
+
+                card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+
+                const shadowX = (x - centerX) / 5;
+                const shadowY = (y - centerY) / 5;
+                card.style.boxShadow = `${-shadowX}px ${-shadowY}px 25px rgba(56, 189, 248, 0.4), 0 10px 20px rgba(0,0,0,0.2)`;
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'perspective(1000px) rotateX(0) rotateY(0) scale3d(1, 1, 1)';
+                card.style.boxShadow = '';
+                card.style.transition = 'transform 0.5s ease, box-shadow 0.5s ease';
+            });
+
+            card.addEventListener('mouseenter', () => {
+                card.style.transition = 'transform 0.1s ease, box-shadow 0.1s ease';
+            });
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,85 @@
+# ====================================================================
+# 【全量优化版】.gitignore - renhangxi_tiktok_bysj 项目专用
+# ====================================================================
+
+# === 1. 安全与隐私 (绝对禁止提交) ===
+.env
+llm_key.txt
+*.key
+/secrets/
+local_settings.py
+
+# === 2. Python 环境与虚拟环境 (关键隔离) ===
+.venv*/
+venv/
+ENV/
+ENV*/
+bin/
+include/
+lib/
+share/
+pyvenv.cfg
+*.manifest
+*.spec
+
+# === 3. Python 缓存与临时文件 ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+*.bak
+*.log
+/logs/
+
+# === 4. Django 框架产物 ===
+db.sqlite3
+db.sqlite3-journal
+db.sqlite3-shm
+db.sqlite3-wal
+/static/collected/
+/staticfiles/
+/media/
+# 如果有自动生成的迁移记录但想保持纯净
+# renhangxi_tiktok_bysj/douyin_hangxi/migrations/00*.py
+
+# === 5. 爬虫浏览器沙盒与原始数据 (DrissionPage/Browser) ===
+**/browser_files/
+**/raw_data/
+**/crawler/logs/
+/videos/
+/data/*.csv
+/data/*.xlsx
+/data/*.json
+
+# === 6. 机器学习与 AI 模型 (大文件隔离) ===
+/ai_models/
+/ml_pipeline/artifacts/
+/ml_pipeline/exported_data/
+*.pkl
+*.joblib
+*.h5
+*.tflite
+*.pb
+
+# === 7. 开发工具与系统缓存 ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+.ipynb_checkpoints/
+
+# === 8. Docker 与 部署残留 (既然已放弃，彻底无视) ===
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+
+# === 9. 临时测试与杂物 ===
+TTTEEESSSTTT/
+temp/
+*.txt
+*.json
+*.tmp
+*.jpg
+!requirements.txt  # 排除例外：确保 requirements.txt 不被上面的 *.txt 误杀

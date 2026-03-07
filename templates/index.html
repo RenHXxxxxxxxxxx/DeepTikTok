@@ -1,0 +1,326 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抖音舆情洞察系统 | Pro Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* --- 1. 全局配色变量 --- */
+        :root {
+            --bg-dark: #f0f2f5;
+            --card-bg: #ffffff;
+            --primary-gradient: linear-gradient(135deg, #fe2d55 0%, #ff5b7f 100%); /* 抖音红渐变 */
+            --secondary-gradient: linear-gradient(135deg, #25f4ee 0%, #00c3ff 100%); /* 抖音蓝渐变 */
+            --purple-gradient: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);   /* 深邃紫渐变 */
+        }
+        body { background-color: var(--bg-dark); font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #333; }
+
+        /* --- 2. 导航栏样式 --- */
+        .navbar { background: #1a1a2e; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .navbar-brand { font-weight: 800; letter-spacing: 1px; color: #fff !important; }
+
+        /* --- 3. 顶部指标卡片 --- */
+        .stat-card {
+            border: none;
+            border-radius: 16px;
+            color: white;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+            height: 140px; /* 固定高度确保整齐 */
+        }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.2); }
+        /* 背景装饰图标 */
+        .stat-card .icon-bg {
+            position: absolute; right: 15px; bottom: -15px;
+            font-size: 6rem; opacity: 0.15; transform: rotate(-15deg);
+        }
+        .stat-content { position: relative; z-index: 2; padding: 25px; }
+        .stat-title { font-size: 0.95rem; opacity: 0.9; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; }
+        .stat-value { font-size: 2.8rem; font-weight: 700; margin-top: 5px; line-height: 1; }
+
+        /* --- 4. 图表容器 --- */
+        .chart-box {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            height: 100%; /* 让同一行的卡片等高 */
+            transition: all 0.3s;
+        }
+        .chart-box:hover { box-shadow: 0 8px 25px rgba(0,0,0,0.08); }
+        .chart-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; border-bottom: 1px solid #f0f0f0; padding-bottom: 12px;
+        }
+        .chart-title { font-size: 1.15rem; font-weight: 700; color: #2c3e50; border-left: 5px solid #fe2d55; padding-left: 12px; }
+        .chart-desc { font-size: 0.85rem; color: #999; font-weight: 400; }
+        .echart-canvas { width: 100%; min-height: 320px; }
+
+        /* --- 5. 排行榜表格 --- */
+        .rank-table th { border-top: none; color: #999; font-weight: 600; font-size: 0.85rem; padding-bottom: 15px; }
+        .rank-table td { vertical-align: middle; font-weight: 600; color: #444; padding: 12px 8px; }
+        /* 奖牌样式 */
+        .rank-badge {
+            width: 28px; height: 28px; display: inline-flex;
+            align-items: center; justify-content: center;
+            border-radius: 50%; font-size: 0.85rem; color: #fff; font-weight: 800;
+            margin-right: 8px;
+        }
+        .rank-1 { background: linear-gradient(45deg, #ffd700, #fdb931); box-shadow: 0 2px 5px rgba(253, 185, 49, 0.4); }
+        .rank-2 { background: linear-gradient(45deg, #e0e0e0, #bdbdbd); }
+        .rank-3 { background: linear-gradient(45deg, #cd7f32, #a0522d); }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="#"><i class="fab fa-tiktok me-2"></i>DOUYIN INSIGHT</a>
+            <div class="d-flex align-items-center">
+                <span class="text-white-50 me-3 small">Current User: <span class="text-white fw-bold">{{ user.username }}</span></span>
+                <a href="{% url 'logout' %}" class="btn btn-sm btn-outline-danger rounded-pill px-4">退出登录</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+
+        <div class="row g-4 mb-4">
+            <div class="col-md-4">
+                <div class="stat-card" style="background: var(--primary-gradient);">
+                    <div class="stat-content">
+                        <div class="stat-title">总样本视频 (Videos)</div>
+                        <div class="stat-value">{{ total_videos }}</div>
+                    </div>
+                    <i class="fas fa-video icon-bg"></i>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card" style="background: var(--secondary-gradient);">
+                    <div class="stat-content">
+                        <div class="stat-title">采集评论总量 (Comments)</div>
+                        <div class="stat-value">{{ total_comments }}</div>
+                    </div>
+                    <i class="fas fa-comments icon-bg"></i>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="stat-card" style="background: var(--purple-gradient);">
+                    <div class="stat-content">
+                        <div class="stat-title">情感健康度 (Sentiment)</div>
+                        <div class="stat-value">{{ avg_sentiment }}</div>
+                    </div>
+                    <i class="fas fa-heartbeat icon-bg"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+
+            <div class="col-lg-8">
+
+                <div class="chart-box">
+                    <div class="chart-header">
+                        <span class="chart-title">🔥 爆款视频互动构成 (Top 6)</span>
+                        <span class="chart-desc">红色=争议度(评论) | 蓝色=传播力(分享)</span>
+                    </div>
+                    <div id="chart-engagement" class="echart-canvas" style="height: 380px;"></div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="chart-box">
+                            <div class="chart-header">
+                                <span class="chart-title">📍 核心受众地域 Top 8</span>
+                            </div>
+                            <div id="chart-ip" class="echart-canvas" style="height: 300px;"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-box">
+                            <div class="chart-header">
+                                <span class="chart-title">💎 高价值"干货"视频</span>
+                                <span class="chart-desc">基于 收藏/点赞 比率</span>
+                            </div>
+                            <div id="chart-ratio" class="echart-canvas" style="height: 300px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+
+                <div class="chart-box" style="min-height: 400px;">
+                    <div class="chart-header">
+                        <span class="chart-title">👥 粉丝量级画像</span>
+                        <span class="chart-desc">分析受众的粉丝基数</span>
+                    </div>
+                    <div id="chart-follower" class="echart-canvas" style="height: 300px;"></div>
+                </div>
+
+                <div class="chart-box" style="height: auto;">
+                    <div class="chart-header">
+                        <span class="chart-title">🏆 头部博主影响力榜</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table rank-table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50px;">排名</th>
+                                    <th>昵称</th>
+                                    <th class="text-end">粉丝量</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in influencer_rank %}
+                                <tr>
+                                    <td>
+                                        <span class="rank-badge {% if forloop.counter == 1 %}rank-1{% elif forloop.counter == 2 %}rank-2{% elif forloop.counter == 3 %}rank-3{% else %}bg-secondary{% endif %}">
+                                            {{ forloop.counter }}
+                                        </span>
+                                    </td>
+                                    <td>{{ item.0 }}</td>
+                                    <td class="text-end fw-bold" style="color: #fe2d55;">{{ item.1 }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="3" class="text-center text-muted py-4">暂无分析数据</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="text-center text-muted mt-5 mb-3 small">
+            &copy; 2026 Douyin Data Insight System. Powered by Django & Echarts.
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script type="text/javascript">
+        // ---------------- 1. 数据准备 ----------------
+        // 使用 safe 过滤器接收 Django 传来的 Python 列表
+        const rawData = {
+            eng: { labels: {{ eng_labels|safe }}, comments: {{ eng_comments|safe }}, shares: {{ eng_shares|safe }} },
+            ip: { labels: {{ ip_labels|safe }}, values: {{ ip_values|safe }} },
+            ratio: { labels: {{ ratio_labels|safe }}, values: {{ ratio_values|safe }} },
+            follower: {{ follower_data|safe }}
+        };
+
+        // 定义配色方案
+        const colors = {
+            red: '#fe2d55',
+            blue: '#25f4ee',
+            blueGrad: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{offset: 0, color: '#00c6fb'}, {offset: 1, color: '#005bea'}]),
+            pinkGrad: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: '#ff758c'}, {offset: 1, color: '#ff7eb3'}])
+        };
+
+        // ---------------- 2. 图表初始化 ----------------
+
+        // [Chart 1] 互动深度分析 (堆叠柱状图)
+        const chartEng = echarts.init(document.getElementById('chart-engagement'));
+        chartEng.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            legend: { top: 0, icon: 'circle' }, // 图例样式
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'category', data: rawData.eng.labels, axisLine: {show: false}, axisTick: {show: false} },
+            yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
+            series: [
+                {
+                    name: '评论(争议)', type: 'bar', stack: 'total',
+                    data: rawData.eng.comments,
+                    itemStyle: { color: colors.red, borderRadius: [0, 0, 4, 4] },
+                    barWidth: '40%',
+                    label: { show: true, position: 'inside', color: '#fff' }
+                },
+                {
+                    name: '分享(传播)', type: 'bar', stack: 'total',
+                    data: rawData.eng.shares,
+                    itemStyle: { color: colors.blue, borderRadius: [4, 4, 0, 0] },
+                    label: { show: true, position: 'top', color: '#333' }
+                }
+            ]
+        });
+
+        // [Chart 2] IP 分布 (横向条形图 - 优化阅读体验)
+        const chartIp = echarts.init(document.getElementById('chart-ip'));
+        chartIp.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '15%', bottom: '3%', top: '3%', containLabel: true },
+            xAxis: { type: 'value', show: false }, // 隐藏X轴
+            yAxis: {
+                type: 'category',
+                data: rawData.ip.labels,
+                inverse: true, // 让第一名显示在最上面
+                axisLine: {show: false},
+                axisTick: {show: false}
+            },
+            series: [{
+                type: 'bar',
+                data: rawData.ip.values,
+                itemStyle: { borderRadius: [0, 10, 10, 0], color: colors.blueGrad },
+                barWidth: '50%',
+                label: { show: true, position: 'right', fontWeight: 'bold', color: '#333' }
+            }]
+        });
+
+        // [Chart 3] 干货比率 (面积折线图)
+        const chartRatio = echarts.init(document.getElementById('chart-ratio'));
+        chartRatio.setOption({
+            tooltip: { trigger: 'axis', formatter: '时长: {b}<br/>干货比: {c}' },
+            grid: { containLabel: true, bottom: 20, top: 30, left: 10, right: 10 },
+            xAxis: { type: 'category', data: rawData.ratio.labels, boundaryGap: false },
+            yAxis: { type: 'value', splitLine: { show: false } },
+            series: [{
+                type: 'line',
+                smooth: true,
+                areaStyle: { opacity: 0.2, color: colors.pinkGrad },
+                lineStyle: { width: 4, color: '#fe2d55' },
+                itemStyle: { color: '#fe2d55', borderWidth: 2, borderColor: '#fff' },
+                data: rawData.ratio.values,
+                symbolSize: 8,
+                label: { show: true, position: 'top', formatter: '{c}' }
+            }]
+        });
+
+        // [Chart 4] 粉丝画像 (环形图)
+        const chartFollower = echarts.init(document.getElementById('chart-follower'));
+        chartFollower.setOption({
+            tooltip: { trigger: 'item' },
+            legend: { bottom: '0%', left: 'center', itemWidth: 10, itemHeight: 10 },
+            series: [{
+                name: '粉丝等级',
+                type: 'pie',
+                radius: ['45%', '70%'],
+                center: ['50%', '45%'],
+                itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+                data: rawData.follower,
+                label: {
+                    show: true,
+                    formatter: '{b}\n{d}%', // 显示百分比
+                    color: '#333'
+                }
+            }]
+        });
+
+        // ---------------- 3. 自适应监听 ----------------
+        window.addEventListener('resize', () => {
+            chartEng.resize();
+            chartIp.resize();
+            chartRatio.resize();
+            chartFollower.resize();
+        });
+    </script>
+</body>
+</html>

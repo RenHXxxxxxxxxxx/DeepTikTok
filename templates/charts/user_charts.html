@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% block content %}
+<style>
+    :root {
+        --primary-bg: rgba(10, 10, 20, 0.85);
+        --card-bg: rgba(255, 255, 255, 0.12);
+        --card-blur: blur(12px);
+        --card-border: 1px solid rgba(255, 255, 255, 0.18);
+        --text-primary: #e0e0ff;
+        --text-secondary: #a0a0c0;
+        --accent-gradient: linear-gradient(135deg, #ff416c, #ff4b2b);
+    }
+
+    body {
+        background: radial-gradient(circle at top left, #0a0a14, #020212);
+        color: var(--text-primary);
+    }
+
+    .glass-card {
+        background: var(--card-bg);
+        backdrop-filter: var(--card-blur);
+        border: var(--card-border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .chart-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        margin-top: 2rem;
+    }
+</style>
+<div class="container-fluid py-4">
+    <div class="chart-stack">
+        <div id="wordCloudCard" class="glass-card" style="height: 600px; display: flex; flex-direction: column;">
+            <h5 class="fw-bold mb-3"><i class="fas fa-cloud me-2" style="color: #ff0844;"></i>受众心智解码词云</h5>
+            <div id="wordCloud" style="flex: 1; width: 100%; min-height: 450px;"></div>
+        </div>
+        <div id="bubbleChartCard" class="glass-card" style="height: 500px; display: flex; flex-direction: column;">
+            <h5 class="fw-bold mb-3"><i class="fas fa-map-marker-alt me-2 text-warning"></i>地域情感共振矩阵</h5>
+            <div id="bubbleChart" style="flex: 1; width: 100%; min-height: 350px;"></div>
+        </div>
+    </div>
+</div>
+{% comment %}*使用JSON数据块方案，彻底规避IDE自动格式化对Django模板变量|safe的破坏*{% endcomment %}
+<script id="wc-data" type="application/json">{{ wordcloud_json|safe }}</script>
+<script id="bubble-data" type="application/json">{{ bubble_data_json|safe }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var wcData = JSON.parse(document.getElementById('wc-data').textContent);
+        var bubbleData = JSON.parse(document.getElementById('bubble-data').textContent);
+        console.log('[DEBUG] wcData length:', wcData ? wcData.length : 'NULL');
+        console.log('[DEBUG] bubbleData length:', bubbleData ? bubbleData.length : 'NULL');
+        console.log('[DEBUG] echarts version:', typeof echarts !== 'undefined' ? echarts.version : 'NOT LOADED');
+        try {
+            var wcDom = document.getElementById('wordCloud');
+            console.log('[DEBUG] wcDom size:', wcDom ? wcDom.offsetWidth + 'x' + wcDom.offsetHeight : 'NOT FOUND');
+            if (wcDom && wcData && wcData.length > 0) {
+                var wcChart = echarts.init(wcDom);
+                // *抖音风霓虹多彩调色盘*
+                var neonPalette = [
+                    '#00f2fe', '#4facfe', '#a18cd1', '#fbc2eb',
+                    '#ff0844', '#ffb199', '#43e97b', '#38f9d7',
+                    '#f093fb', '#f5576c', '#ffd86f', '#fc5c7d',
+                    '#6a11cb', '#2575fc', '#00c9ff', '#92fe9d',
+                    '#ff6a00', '#ee0979', '#ff5858', '#f09819'
+                ];
+                wcChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        show: true,
+                        formatter: function (p) {
+                            return '<b style="font-size:16px">' + p.name + '</b><br/>提及 <b>' + p.value + '</b> 次';
+                        },
+                        backgroundColor: 'rgba(15,15,30,0.9)',
+                        borderColor: '#ff0844',
+                        textStyle: { color: '#e0e0ff' }
+                    },
+                    series: [{
+                        type: 'wordCloud',
+                        left: 'center',
+                        top: 'center',
+                        width: '95%',
+                        height: '95%',
+                        shape: 'pentagon',
+                        sizeRange: [18, 80],
+                        rotationRange: [-30, 30],
+                        rotationStep: 15,
+                        gridSize: 6,
+                        drawOutOfBound: false,
+                        layoutAnimation: true,
+                        textStyle: {
+                            fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+                            fontWeight: 'bold',
+                            color: function () {
+                                return neonPalette[Math.floor(Math.random() * neonPalette.length)];
+                            }
+                        },
+                        emphasis: {
+                            focus: 'self',
+                            textStyle: {
+                                textShadowBlur: 20,
+                                textShadowColor: '#fff',
+                                color: '#ffffff'
+                            }
+                        },
+                        data: wcData
+                    }]
+                });
+                window.addEventListener('resize', function () { wcChart.resize(); });
+                console.log('[DEBUG] WordCloud initialized successfully');
+            } else {
+                console.warn('[DEBUG] WordCloud skipped: dom=', !!wcDom, 'data=', !!(wcData && wcData.length));
+            }
+        } catch (e) { console.error('WordCloud init failed:', e); }
+        try {
+            var bubbleDom = document.getElementById('bubbleChart');
+            if (bubbleDom && bubbleData && bubbleData.length > 0) {
+                var bubbleChart = echarts.init(bubbleDom);
+                var formatted = bubbleData.map(function (item) { return { value: [item.ip, item.count, item.sentiment], name: item.ip }; });
+                bubbleChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'shadow' },
+                        backgroundColor: 'rgba(15,15,30,0.9)',
+                        borderColor: '#00f2fe',
+                        textStyle: { color: '#e0e0ff' },
+                        formatter: function (params) {
+                            var p = params[0];
+                            return '<b style="font-size:16px">' + p.name + '</b><br/>' +
+                                '评论数量: <b>' + p.data.value[1] + '</b><br/>' +
+                                '情感得分: <b>' + p.data.value[2] + '</b>';
+                        }
+                    },
+                    grid: { top: '15%', left: '3%', right: '4%', bottom: '10%', containLabel: true },
+                    xAxis: {
+                        type: 'category',
+                        data: bubbleData.map(function (i) { return i.ip; }),
+                        axisLabel: { color: '#ccc', interval: 0, rotate: 30 }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: { color: '#ccc' },
+                        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }
+                    },
+                    series: [{
+                        type: 'bar',
+                        data: formatted,
+                        barWidth: '40%',
+                        itemStyle: {
+                            color: function (p) {
+                                var sentiment = p.data.value[2];
+                                if (sentiment >= 0.6) return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#ff0844' }, { offset: 1, color: '#ffb199' }]);
+                                else if (sentiment <= 0.4) return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#00f2fe' }, { offset: 1, color: '#4facfe' }]);
+                                else return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#a18cd1' }, { offset: 1, color: '#fbc2eb' }]);
+                            },
+                            borderRadius: [6, 6, 0, 0],
+                            shadowBlur: 10,
+                            shadowColor: 'rgba(0, 0, 0, 0.3)'
+                        }
+                    }]
+                });
+                window.addEventListener('resize', function () { bubbleChart.resize(); });
+                console.log('[DEBUG] BarChart initialized successfully');
+            }
+        } catch (e) { console.error('BarChart init failed:', e); }
+    });
+</script>
+{% endblock %}

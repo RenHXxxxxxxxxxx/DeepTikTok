@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<!-- *前端重构：B 端 SaaS 业务系统的架构级控制中心面板* -->
+<div class="container-fluid mt-4">
+    {% if error_msg %}
+    <div class="alert alert-danger shadow-sm border-0 border-start border-4 border-danger">
+        <i class="fas fa-exclamation-triangle me-2"></i> <strong>数据挂载失败：</strong> {{ error_msg }}
+    </div>
+    {% endif %}
+
+    <div class="row">
+        <!-- *左侧视图栏：账户权限层与底层算力集群探针* -->
+        <div class="col-lg-4">
+            <!-- *身份追踪：超管权限标识* -->
+            <div class="card shadow-sm mb-4 border-0">
+                <div class="card-body text-center bg-dark text-white rounded-3">
+                    <h5 class="fw-bold mb-1">{{ user.username }}</h5>
+                    <p class="text-secondary small mb-3">{{ account_info.tier }}</p>
+                    <span class="badge bg-success shadow-sm">{{ account_info.ai_power }}</span>
+                </div>
+            </div>
+
+            <!-- *API 集成与核心调度信息 (SaaS Quota Display)* -->
+            <div class="card shadow-sm mb-4 border-0 border-start border-4 border-secondary">
+                <div class="card-header bg-white fw-bold">
+                    <i class="fas fa-microchip me-2 text-secondary"></i>API 集成与权益
+                </div>
+                <!-- *新增的真实API Key配置表单* -->
+                <div class="card-body bg-light pb-2">
+                    <form method="POST" action="{% url 'profile' %}">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="api_key" class="form-label small text-secondary fw-bold">内容分析大模型 API Key</label>
+                            <div class="input-group input-group-sm mb-1">
+                                <input type="password" class="form-control" id="api_key" name="api_key"
+                                    placeholder="{{ account_info.api_token }}">
+                                <button class="btn btn-outline-secondary" type="button" id="toggleKeyBtn"
+                                    onclick="toggleKeyVisibility()">
+                                    <i class="fas fa-eye" id="toggleKeyIcon"></i>
+                                </button>
+                            </div>
+                            <div class="form-text" style="font-size: 0.75rem;">若不修改当前密钥请保持为空。</div>
+                        </div>
+                        <div class="d-grid mb-1">
+                            <button type="submit" class="btn btn-dark btn-sm shadow-sm"><i class="fas fa-save me-1"></i>
+                                保存配置</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- *右侧视图栏：数据池水位监控与安全审计追踪* -->
+        <div class="col-lg-8">
+            <!-- *核心数据容器规模仪表盘 (Data Assets Monitor)* -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 border-top border-4 border-primary">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-semibold" style="font-size: 0.8rem;">我的灵感素材库</h6>
+                            <h2 class="mb-0 fw-bold">{{ assets.total_videos }}</h2>
+                            <small class="text-primary"><i class="fas fa-database"></i> 个视频</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 border-top border-4 border-info">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-semibold" style="font-size: 0.8rem;">已洞察观众心声</h6>
+                            <h2 class="mb-0 fw-bold">{{ assets.total_comments }}</h2>
+                            <small class="text-info"><i class="fas fa-comments"></i> 条评论</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- *由于用户请求已被移除的部分* -->
+        </div>
+    </div>
+</div>
+
+<style>
+    /* *系统特化 CSS：深层平滑滤镜与悬停响应补偿* */
+    .card {
+        transition: all 0.25s cubic-bezier(0.02, 0.01, 0.47, 1);
+    }
+
+    .card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .08) !important;
+    }
+
+    .font-monospace {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    }
+</style>
+
+<script>
+    // *密码切换显示功能*
+    function toggleKeyVisibility() {
+        var keyInput = document.getElementById('api_key');
+        var toggleIcon = document.getElementById('toggleKeyIcon');
+
+        if (keyInput.type === 'password') {
+            keyInput.type = 'text';
+            toggleIcon.classList.remove('fa-eye');
+            toggleIcon.classList.add('fa-eye-slash');
+        } else {
+            keyInput.type = 'password';
+            toggleIcon.classList.remove('fa-eye-slash');
+            toggleIcon.classList.add('fa-eye');
+        }
+    }
+</script>
+{% endblock %}

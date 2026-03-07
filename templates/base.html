@@ -1,0 +1,1013 @@
+﻿{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抖音视频分析助手</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --sidebar-width: 250px;
+            --sidebar-gap: 12px;
+            --primary-color: #fe2d55;
+            /* *抖音红* */
+            --secondary-color: #25f4ee;
+            /* *抖音蓝* */
+            --neon-blue: #38bdf8;
+            --dark-bg: #1a1a2e;
+            --light-bg: #f4f6f9;
+        }
+
+        body {
+            background-color: var(--light-bg);
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* *悬浮毛玻璃侧边栏* */
+        .sidebar {
+            width: var(--sidebar-width);
+            height: calc(100vh - var(--sidebar-gap) * 2);
+            position: fixed;
+            top: var(--sidebar-gap);
+            left: var(--sidebar-gap);
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 16px;
+            color: #fff;
+            z-index: 1000;
+            padding-top: 1rem;
+            transition: all 0.3s;
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        /* *侧边栏自定义滚动条* */
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.3);
+            border-radius: 2px;
+        }
+
+        .sidebar-brand {
+            font-size: 1.25rem;
+            font-weight: bold;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid rgba(56, 189, 248, 0.15);
+            margin-bottom: 1rem;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .sidebar-brand i {
+            margin-right: 10px;
+            color: var(--neon-blue);
+        }
+
+        /* *Logo 区小怪兽容器* */
+        .sidebar-brand .brand-text {
+            position: relative;
+            z-index: 2;
+        }
+
+        .sidebar-monster {
+            position: absolute;
+            right: 18px;
+            bottom: -20px;
+            width: 28px;
+            height: 28px;
+            z-index: 0;
+            pointer-events: none;
+            animation: monster-peek-bottom 10s ease-in-out infinite;
+            animation-delay: 3s;
+        }
+
+        .sidebar-monster .monster-body {
+            width: 28px;
+            height: 28px;
+            background: rgba(56, 189, 248, 0.25);
+            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+            position: relative;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+        }
+
+        .sidebar-monster .monster-eye {
+            position: absolute;
+            width: 7px;
+            height: 7px;
+            background: #fff;
+            border-radius: 50%;
+            top: 8px;
+        }
+
+        .sidebar-monster .monster-eye.left {
+            left: 6px;
+        }
+
+        .sidebar-monster .monster-eye.right {
+            left: 15px;
+        }
+
+        .sidebar-monster .monster-eye::after {
+            content: '';
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            background: #0f172a;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+        }
+
+        /* *小怪兽从底部探头动画 (10s 周期)* */
+        @keyframes monster-peek-bottom {
+
+            0%,
+            65% {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+
+            70% {
+                transform: translateY(33%);
+                opacity: 1;
+            }
+
+            83% {
+                transform: translateY(33%);
+                opacity: 1;
+            }
+
+            88% {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+
+            100% {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+        }
+
+        /* *另一只小怪兽从侧面探头 (12s 周期，错开时序)* */
+        .sidebar-monster-side {
+            position: absolute;
+            left: -16px;
+            top: 50%;
+            transform: translateX(-100%) translateY(-50%);
+            width: 22px;
+            height: 22px;
+            z-index: 0;
+            pointer-events: none;
+            animation: monster-peek-side 12s ease-in-out infinite;
+            animation-delay: 8s;
+        }
+
+        .sidebar-monster-side .monster-body {
+            width: 22px;
+            height: 22px;
+            background: rgba(254, 45, 85, 0.25);
+            border-radius: 50%;
+            position: relative;
+            box-shadow: 0 0 8px rgba(254, 45, 85, 0.4);
+        }
+
+        .sidebar-monster-side .monster-eye {
+            position: absolute;
+            width: 5px;
+            height: 5px;
+            background: #fff;
+            border-radius: 50%;
+            top: 6px;
+        }
+
+        .sidebar-monster-side .monster-eye.left {
+            left: 4px;
+        }
+
+        .sidebar-monster-side .monster-eye.right {
+            left: 12px;
+        }
+
+        .sidebar-monster-side .monster-eye::after {
+            content: '';
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: #0f172a;
+            border-radius: 50%;
+            top: 1.5px;
+            left: 1.5px;
+        }
+
+        @keyframes monster-peek-side {
+
+            0%,
+            60% {
+                transform: translateX(-100%) translateY(-50%);
+                opacity: 0;
+            }
+
+            66% {
+                transform: translateX(-30%) translateY(-50%);
+                opacity: 1;
+            }
+
+            80% {
+                transform: translateX(-30%) translateY(-50%);
+                opacity: 1;
+            }
+
+            86% {
+                transform: translateX(-100%) translateY(-50%);
+                opacity: 0;
+            }
+
+            100% {
+                transform: translateX(-100%) translateY(-50%);
+                opacity: 0;
+            }
+        }
+
+        .nav-link {
+            color: rgba(255, 255, 255, 0.7);
+            padding: 0.75rem 1.25rem;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            margin: 2px 8px;
+            border-radius: 8px;
+            transition: all 0.25s ease;
+            border: none;
+        }
+
+        /* *Hover 态：电光蓝图标 + 霓虹光晕* */
+        .nav-link:hover {
+            color: #fff;
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .nav-link:hover i {
+            color: var(--neon-blue) !important;
+            filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.7));
+        }
+
+        /* *Active (选中) 态：3D 浮雕效果* */
+        .nav-link.active {
+            color: #fff;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(56, 189, 248, 0.05));
+            transform: translateY(-2px);
+            box-shadow:
+                0 4px 12px rgba(0, 0, 0, 0.3),
+                0 1px 0 rgba(56, 189, 248, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            border: none;
+        }
+
+        .nav-link.active i {
+            color: var(--neon-blue) !important;
+            filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
+        }
+
+        .nav-link i {
+            width: 25px;
+            text-align: center;
+            margin-right: 10px;
+            transition: all 0.25s ease;
+        }
+
+        /* *分类标题：半透明霓虹蓝 + 渐变分割线* */
+        .nav-group-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: rgba(56, 189, 248, 0.6);
+            padding: 1.5rem 1.5rem 0.8rem;
+            font-weight: 600;
+            position: relative;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-group-label::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 1.5rem;
+            right: 1rem;
+            height: 1px;
+            background: linear-gradient(to right, rgba(56, 189, 248, 0.5), transparent);
+        }
+
+        /* 主内容区域 */
+        /* *主内容区适配悬浮侧边栏间距* */
+        .main-content {
+            margin-left: calc(var(--sidebar-width) + var(--sidebar-gap) * 2);
+            padding: 2rem;
+            transition: all 0.3s;
+        }
+
+        /* 顶部导航 */
+        .top-navbar {
+            background: #fff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            padding: 0.8rem 2rem;
+            margin-bottom: 2rem;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* 响应式适配 */
+        @media (max-width: 768px) {
+            .sidebar {
+                margin-left: calc(-1 * var(--sidebar-width));
+            }
+
+            .sidebar.show {
+                margin-left: 0;
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+        }
+
+        /* *UI 锁定状态样式 - GlobalTracker 并发守卫* */
+        .ui-lockdown-disabled {
+            opacity: 0.5 !important;
+            cursor: not-allowed !important;
+            pointer-events: none !important;
+        }
+
+        /* *任务进行中导航栏发光效果* */
+        .task-in-progress-glow {
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05),
+                0 0 15px rgba(254, 45, 85, 0.3),
+                0 0 30px rgba(254, 45, 85, 0.15) !important;
+            border-bottom: 2px solid var(--primary-color) !important;
+            transition: box-shadow 0.3s ease, border-bottom 0.3s ease;
+        }
+
+        /* *状态胶囊脉动动画* */
+        @keyframes pulse-glow-animation {
+
+            0%,
+            100% {
+                box-shadow: 0 0 5px rgba(37, 244, 238, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 15px rgba(37, 244, 238, 0.8),
+                    0 0 25px rgba(254, 45, 85, 0.4);
+            }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow-animation 1.5s ease-in-out infinite;
+        }
+
+        /* *SimpleUI 样式覆盖与赛博数智风格* */
+        :root {
+            --el-color-primary: #38bdf8 !important;
+            --el-color-primary-light-3: rgba(56, 189, 248, 0.7) !important;
+            --el-color-primary-light-5: rgba(56, 189, 248, 0.5) !important;
+            --el-color-primary-light-7: rgba(56, 189, 248, 0.3) !important;
+            --el-color-primary-light-9: rgba(56, 189, 248, 0.1) !important;
+            --el-color-primary-dark-2: #0284c7 !important;
+        }
+
+        body {
+            background-color: transparent !important;
+        }
+
+        .el-card {
+            background-color: rgba(26, 26, 46, 0.6) !important;
+            backdrop-filter: blur(15px) !important;
+            -webkit-backdrop-filter: blur(15px) !important;
+            border: 1px solid rgba(56, 189, 248, 0.15) !important;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1) !important;
+            color: #fff !important;
+            transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+        }
+
+        .el-button--primary {
+            background: linear-gradient(45deg, #0284c7, #38bdf8) !important;
+            border: none !important;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3) !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .el-button--primary:hover {
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.6) !important;
+            transform: translateY(-1px);
+        }
+
+        #cyber-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -999;
+            pointer-events: none;
+            background-color: #0f172a;
+            /* 深色赛博背景 */
+        }
+
+        .cyber-monster.active {
+            filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.8));
+            transform: scale(1.05);
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <!-- *小怪兽：侧面探头* -->
+            <div class="sidebar-monster-side">
+                <div class="monster-body">
+                    <div class="monster-eye left"></div>
+                    <div class="monster-eye right"></div>
+                </div>
+            </div>
+            <i class="fab fa-tiktok"></i>
+            <span class="brand-text">视频分析助手</span>
+            <!-- *小怪兽：底部探头* -->
+            <div class="sidebar-monster">
+                <div class="monster-body">
+                    <div class="monster-eye left"></div>
+                    <div class="monster-eye right"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav flex-column">
+            <div class="nav-group-label">整体概览</div>
+            <a href="{% url 'dashboard' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                <i class="fas fa-home"></i> 情况一眼看
+            </a>
+
+            <div class="nav-group-label">资产与数据管理</div>
+            <a href="{% url 'data_warehouse' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'data_warehouse' %}active{% endif %}">
+                <i class="fas fa-industry"></i> 资产精炼工厂
+            </a>
+            <a href="{% url 'video_list' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'video_list' %}active{% endif %}">
+                <i class="fas fa-folder"></i> 视频信息保存处
+            </a>
+            <a href="{% url 'comment_list' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'comment_list' %}active{% endif %}">
+                <i class="fas fa-database"></i> 观众评论保存处
+            </a>
+
+            <div class="nav-group-label">内容与观众分析</div>
+            <a href="{% url 'chart_user' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'chart_user' %}active{% endif %}">
+                <i class="fas fa-user-friends"></i> 粉丝长什么样
+            </a>
+            <a href="{% url 'chart_content' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'chart_content' %}active{% endif %}">
+                <i class="fas fa-search"></i> 视频深度可视化分析
+            </a>
+            <a href="{% url 'chart_sentiment' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'chart_sentiment' %}active{% endif %}">
+                <i class="fas fa-comment-dots"></i> 观众心情与想法
+            </a>
+
+            <div class="nav-group-label">上热门助手</div>
+            <a href="{% url 'predict_page' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'predict_page' %}active{% endif %}">
+                <i class="fas fa-fire"></i> 预测视频火不火
+            </a>
+
+            <div class="nav-group-label">个人设置</div>
+            <a href="{% url 'profile' %}"
+                class="nav-link {% if request.resolver_match.url_name == 'profile' %}active{% endif %}">
+                <i class="fas fa-user-circle"></i> 我的账号
+            </a>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <div class="top-navbar">
+            <div>
+                <h5 class="m-0 text-secondary" id="page-title">数据管理面板</h5>
+            </div>
+
+            <!-- *全局状态胶囊：显示爬虫/分析进度* -->
+            <div id="nav-status-capsule" class="ms-3 d-none align-items-center">
+                <span class="badge rounded-pill bg-dark d-flex align-items-center p-2 shadow-sm"
+                    style="border: 1px solid var(--secondary-color);">
+                    <i id="status-icon" class="fas fa-spider me-2 text-info"></i>
+                    <small id="status-text" class="text-white fw-normal">Ready</small>
+                    <div class="progress ms-2" style="width: 60px; height: 6px; background-color: #2a2a40;">
+                        <div id="status-progress-bar" class="progress-bar bg-info" role="progressbar" style="width: 0%">
+                        </div>
+                    </div>
+                </span>
+            </div>
+
+            <!-- *全局快速启动按钮* -->
+            <button id="global-play-btn" class="btn btn-danger btn-sm rounded-circle shadow-sm me-2 ms-auto"
+                data-bs-toggle="modal" data-bs-target="#globalTaskModal" title="Start New Task"
+                style="background-color: #fe2d55; border: none;">
+                <i class="fas fa-play"></i>
+            </button>
+
+            <!-- *命令菜单下拉：主题切换* -->
+            <div class="dropdown me-4">
+                <button id="commandMenuBtn" class="btn btn-link btn-sm text-light dropdown-toggle" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false"
+                    style="background-color: var(--dark-bg); border-radius: 8px;">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow">
+                    <h6 class="dropdown-header">Active Theme</h6>
+                    {% for theme in themes_list %}
+                    <li>
+                        <a class="dropdown-item {% if theme == active_theme %}active{% endif %}" href="#"
+                            data-theme="{{ theme }}" onclick="changeThemePackage('{{ theme }}'); return false;">
+                            <i class="fas fa-box-open me-2"></i>{{ theme }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <div class="d-flex align-items-center">
+                <a href="{% url 'profile' %}" class="text-decoration-none me-3 text-secondary">
+                    欢迎您: <strong>{{ user.username }}</strong>
+                </a>
+                <a href="{% url 'logout' %}" class="btn btn-outline-danger btn-sm">
+                    <i class="fas fa-sign-out-alt"></i> 退出登录
+                </a>
+            </div>
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    {% block extra_js %}{% endblock %}
+
+    <script>
+        function changeThemePackage(newTheme) {
+            console.log("正在尝试切换至主题: " + newTheme);
+            const formData = new FormData();
+            formData.append('theme_label', newTheme);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            fetch("{% url 'switch_theme' %}", {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // 切换成功后立即刷新当前页面，触发后端 filter 重新加载数据
+                        window.location.reload();
+                    } else {
+                        alert("切换失败: " + data.message);
+                    }
+                })
+                .catch(err => {
+                    console.error("切换请求异常:", err);
+                    alert("网络连接异常，无法切换主题包");
+                });
+        }
+    </script>
+
+    <!-- *全局任务模态框：从 warehouse.html 迁移而来* -->
+    <div class="modal fade" id="globalTaskModal" tabindex="-1" aria-labelledby="globalTaskModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title" id="globalTaskModalLabel">
+                        <i class="fas fa-spider me-2"></i>配置在线抓取任务
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="globalSpiderForm">
+                        <!-- *多关键词批量输入区* -->
+                        <div class="mb-3">
+                            <label for="global-spider-keywords" class="form-label fw-bold d-flex align-items-center">
+                                <i class="fas fa-search text-primary me-1"></i>抓取关键词
+                                <span class="ms-2 badge bg-secondary" data-bs-toggle="tooltip" data-bs-placement="right"
+                                    title="输入多个关键词可批量采集，例如输入10个关键词，每个限制500条，即可达成5000视频目标">
+                                    <i class="fas fa-question-circle"></i>
+                                </span>
+                            </label>
+                            <textarea class="form-control" id="global-spider-keywords" rows="3"
+                                placeholder="输入关键词（如：PDD, 护网行动, 鬼畜）使用逗号分隔" required></textarea>
+                            <div class="form-text">支持批量输入：使用英文逗号分隔多个关键词，系统将依次采集</div>
+                        </div>
+
+                        <!-- *限制模式切换* -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-sliders-h text-success me-1"></i>限制模式
+                            </label>
+                            <div class="btn-group w-100" role="group" aria-label="Limit Mode Toggle">
+                                <input type="radio" class="btn-check" name="limitMode" id="limitModeIndividual"
+                                    value="individual" checked>
+                                <label class="btn btn-outline-primary" for="limitModeIndividual">
+                                    <i class="fas fa-cube me-1"></i>单关键词限制
+                                </label>
+                                <input type="radio" class="btn-check" name="limitMode" id="limitModeGlobal"
+                                    value="global">
+                                <label class="btn btn-outline-primary" for="limitModeGlobal">
+                                    <i class="fas fa-cubes me-1"></i>全局总量限制
+                                </label>
+                            </div>
+                            <div class="form-text" id="limitModeHint">
+                                <span id="hint-individual">每个关键词独立采集指定数量的视频</span>
+                                <span id="hint-global" class="d-none">系统将把总量目标平均分配到所有关键词</span>
+                            </div>
+                        </div>
+
+                        <!-- *视频数量限制 (带HTML5验证)* -->
+                        <div class="mb-3">
+                            <label for="global-spider-max-videos" class="form-label fw-bold">
+                                <i class="fas fa-video text-danger me-1"></i>
+                                <span id="limit-label-text">每关键词最大视频数</span>
+                            </label>
+                            <input type="number" class="form-control" id="global-spider-max-videos" value="500" min="1"
+                                max="10000" step="1" pattern="[0-9]+" required
+                                oninvalid="this.setCustomValidity('请输入1-10000之间的正整数')"
+                                oninput="this.setCustomValidity('')">
+                            <div class="form-text" id="limit-help-text">
+                                大规模采集建议设置为 100-1000；输入10个关键词×500条 = 5000视频目标
+                            </div>
+                        </div>
+
+                        <!-- *每视频评论数* -->
+                        <div class="mb-3">
+                            <label for="global-spider-max-comments" class="form-label fw-bold">
+                                <i class="fas fa-comments text-info me-1"></i>每视频最大评论数
+                            </label>
+                            <select class="form-select" id="global-spider-max-comments">
+                                <option value="10">10 条</option>
+                                <option value="20">20 条</option>
+                                <option value="50" selected>50 条 (推荐)</option>
+                                <option value="100">100 条</option>
+                                <option value="200">200 条 (较慢)</option>
+                            </select>
+                            <div class="form-text">评论不足时会自动提取全部并跳过</div>
+                        </div>
+
+                        <!-- *目标数据主题：支持选择已有或创建新主题* -->
+                        <div class="mb-3">
+                            <label for="global-spider-theme-select" class="form-label fw-bold">
+                                <i class="fas fa-tag text-warning me-1"></i>目标主题
+                                <span class="ms-2 badge bg-info" data-bs-toggle="tooltip" data-bs-placement="right"
+                                    title="选择已有主题以追加数据，或输入新名称创建专属数据桶">
+                                    <i class="fas fa-info-circle"></i>
+                                </span>
+                            </label>
+                            <div class="input-group">
+                                <select class="form-select" id="global-spider-theme-select" style="max-width: 50%;">
+                                    <option value="" selected>-- 选择已有主题 --</option>
+                                    {% for theme in themes_list %}
+                                    <option value="{{ theme }}" {% if theme == active_theme %}selected{% endif %}>
+                                        {{ theme }}
+                                    </option>
+                                    {% endfor %}
+                                    <option value="__new__">➕ 创建新主题...</option>
+                                </select>
+                                <input type="text" class="form-control" id="global-spider-theme-new"
+                                    placeholder="输入新主题名称" style="display: none;">
+                            </div>
+                            <!-- *隐藏字段：最终提交的主题名称* -->
+                            <input type="hidden" id="global-spider-theme-name" value="{{ active_theme|default:'' }}"
+                                required>
+                            <div class="form-text">数据将归档到所选主题下，便于后续分析与切换</div>
+                        </div>
+                    </form>
+
+                    <!-- *限制模式切换脚本：更新提示文本* -->
+                    <script>
+                        // *限制模式切换逻辑*
+                        document.querySelectorAll('input[name="limitMode"]').forEach(radio => {
+                            radio.addEventListener('change', function () {
+                                const isGlobal = this.value === 'global';
+                                document.getElementById('hint-individual').classList.toggle('d-none', isGlobal);
+                                document.getElementById('hint-global').classList.toggle('d-none', !isGlobal);
+                                document.getElementById('limit-label-text').innerText =
+                                    isGlobal ? '全局视频总量目标' : '每关键词最大视频数';
+                                document.getElementById('limit-help-text').innerText =
+                                    isGlobal ? '系统将按关键词数量自动均分此目标' :
+                                        '大规模采集建议设置为 100-1000；输入10个关键词×500条 = 5000视频目标';
+                            });
+                        });
+
+                        // *主题选择器：切换新建输入框*
+                        document.getElementById('global-spider-theme-select').addEventListener('change', function () {
+                            const newInput = document.getElementById('global-spider-theme-new');
+                            const hiddenField = document.getElementById('global-spider-theme-name');
+                            if (this.value === '__new__') {
+                                newInput.style.display = 'block';
+                                newInput.required = true;
+                                newInput.focus();
+                                hiddenField.value = '';
+                            } else {
+                                newInput.style.display = 'none';
+                                newInput.required = false;
+                                hiddenField.value = this.value;
+                            }
+                        });
+
+                        // *新主题输入同步到隐藏字段*
+                        document.getElementById('global-spider-theme-new').addEventListener('input', function () {
+                            document.getElementById('global-spider-theme-name').value = this.value.trim();
+                        });
+
+                        // *初始化 Bootstrap Tooltips*
+                        document.addEventListener('DOMContentLoaded', function () {
+                            const tooltipTriggerList = [].slice.call(
+                                document.querySelectorAll('#globalTaskModal [data-bs-toggle="tooltip"]')
+                            );
+                            tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+                                new bootstrap.Tooltip(tooltipTriggerEl);
+                            });
+                        });
+                    </script>
+
+                    <!-- *进度展示面板 (默认隐藏)* -->
+                    <div id="global-spider-progress-panel" class="d-none py-3">
+                        <h5 class="text-center text-primary mb-3">
+                            <i class="fas fa-circle-notch fa-spin me-2"></i>正在执行云端采集...
+                        </h5>
+
+                        <!-- *新增: Global Task Radar Stepper* -->
+                        <div id="global-task-radar"
+                            class="d-flex justify-content-between mb-3 text-muted fw-bold small text-center px-1">
+                            <div id="step-video" class="radar-step flex-fill py-2 rounded-pill mx-1"
+                                style="background: #f8f9fa; transition: 0.3s;"><i class="fas fa-video me-1"></i>1. 视频流采集
+                            </div>
+                            <div id="step-comment" class="radar-step flex-fill py-2 rounded-pill mx-1"
+                                style="background: #f8f9fa; transition: 0.3s;"><i class="fas fa-comments me-1"></i>2.
+                                评论区挖掘</div>
+                            <div id="step-ai" class="radar-step flex-fill py-2 rounded-pill mx-1"
+                                style="background: #f8f9fa; transition: 0.3s;"><i class="fas fa-brain me-1"></i>3. AI
+                                特征分析</div>
+                        </div>
+                        <style>
+                            .radar-step.active {
+                                background: #fe2d55 !important;
+                                color: white !important;
+                                box-shadow: 0 4px 10px rgba(254, 45, 85, 0.3);
+                            }
+                        </style>
+
+                        <div class="progress mb-2 shadow-sm" style="height: 25px; border-radius: 12px;">
+                            <div id="radar-progress-bar"
+                                class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                                role="progressbar" style="width: 0%; font-weight: bold;">0%</div>
+                        </div>
+                        <div class="d-flex justify-content-between small px-2 mt-2">
+                            <span id="radar-msg" class="text-secondary fw-bold">正在初始化任务队列...</span>
+                            <span id="global-spider-eta-text" class="text-danger fw-bold"><i
+                                    class="far fa-clock me-1"></i>计算中...</span>
+                        </div>
+                        <div class="text-center mt-3 small text-muted">
+                            请勿关闭此窗口，任务正在后台高速运行中
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>取消
+                    </button>
+                    <button type="button" class="btn btn-success" id="btn-start-spider-execute"
+                        onclick="forceLaunchSpider()" data-launch-url="{% url 'launch_spider_api' %}"
+                        data-status-url="{% url 'get_spider_status_api' %}" data-csrf="{{ csrf_token }}">
+                        <i class="fas fa-rocket me-1"></i>开始在线抓取
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- *全局爬虫逻辑已迁移至 global_tracker.js* -->
+
+    <!-- *全局状态轮询引擎：DOM Ready 后自动开始监控* -->
+    <script src="{% static 'js/global_tracker.js' %}?v=9999"></script>
+
+    <!-- *任务完成通知 Toast：由 global_tracker.js 触发* -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 10000;">
+        <div id="finishToast" class="toast align-items-center text-white bg-success border-0 shadow-lg" role="alert"
+            aria-live="assertive" aria-atomic="true" data-bs-delay="8000">
+            <div class="d-flex p-2">
+                <div class="toast-body d-flex align-items-center">
+                    <div class="me-2" style="font-size: 1.2rem;">
+                        <i class="fas fa-check-circle animate__animated animate__bounceIn"></i>
+                    </div>
+                    <div>
+                        <strong class="d-block">任务执行完毕!</strong>
+                        <small id="toast-message" class="opacity-75">数据已成功同步至本地仓库。</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
+                    aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.forceLaunchSpider = async function () {
+            const btn = document.getElementById('btn-start-spider-execute');
+            if (btn.disabled) return;
+
+            const originalHTML = btn.innerHTML;
+
+            // Fallback notifier
+            const notify = (msg) => {
+                if (typeof showToastNotification === 'function') {
+                    try { showToastNotification(msg); } catch (e) { alert(msg); }
+                } else { alert(msg); }
+            };
+
+            try {
+                const keywordInput = document.getElementById('global-spider-keywords');
+                const themeNameInput = document.getElementById('global-spider-theme-name');
+                const maxVideosInput = document.getElementById('global-spider-max-videos');
+                const maxCommentsInput = document.getElementById('global-spider-max-comments');
+                const limitModeInput = document.querySelector('input[name="limitMode"]:checked');
+
+                const keyword = keywordInput ? keywordInput.value.trim() : '';
+                const themeName = themeNameInput ? themeNameInput.value.trim() : '默认主题';
+                const maxVideos = maxVideosInput ? maxVideosInput.value : 10;
+                const maxComments = maxCommentsInput ? maxCommentsInput.value : 50;
+                const isGlobalLimit = limitModeInput ? (limitModeInput.value === 'global') : false;
+
+                let csrfToken = btn.getAttribute('data-csrf') || (document.querySelector('[name=csrfmiddlewaretoken]') ? document.querySelector('[name=csrfmiddlewaretoken]').value : '');
+
+                if (!keyword) return notify('请输入抓取关键词');
+                if (!themeName) return notify('请输入目标主题');
+
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>正在启动...';
+
+                const formData = new FormData();
+                formData.append('keyword', keyword);
+                formData.append('theme_name', themeName);
+                formData.append('max_videos', maxVideos);
+                formData.append('max_comments', maxComments);
+                formData.append('is_global_limit', isGlobalLimit);
+                if (csrfToken) formData.append('csrfmiddlewaretoken', csrfToken);
+
+                const response = await fetch('/api/launch_spider/', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (data.status === 'success' || data.success) {
+                    notify('🚀 ' + (data.message || '任务启动成功'));
+                    const formEl = document.getElementById('globalSpiderForm');
+                    const progressPanel = document.getElementById('global-spider-progress-panel');
+                    if (formEl) formEl.classList.add('d-none');
+                    if (progressPanel) progressPanel.classList.remove('d-none');
+                    if (typeof startModalPolling === 'function') startModalPolling('/api/spider_status/');
+                } else {
+                    notify('❌ 启动失败: ' + data.message);
+                }
+            } catch (err) {
+                console.error("Launch Error:", err);
+                notify('❌ 异常: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
+        };
+    </script>
+
+    <canvas id="cyber-canvas"></canvas>
+    <script>
+        /* *神经元连线粒子动效与小怪兽联动* */
+        (function () {
+            const canvas = document.getElementById('cyber-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            let width, height;
+            let particles = [];
+
+            function init() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+                particles = [];
+                const particleCount = Math.floor((width * height) / 12000);
+                for (let i = 0; i < particleCount; i++) {
+                    particles.push({
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        vx: (Math.random() - 0.5) * 0.8,
+                        vy: (Math.random() - 0.5) * 0.8,
+                        radius: Math.random() * 1.5 + 0.5
+                    });
+                }
+            }
+
+            function animate() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.8)';
+
+                for (let i = 0; i < particles.length; i++) {
+                    let p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    if (p.x < 0 || p.x > width) p.vx *= -1;
+                    if (p.y < 0 || p.y > height) p.vy *= -1;
+
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    for (let j = i + 1; j < particles.length; j++) {
+                        let p2 = particles[j];
+                        let dx = p.x - p2.x;
+                        let dy = p.y - p2.y;
+                        let distSq = dx * dx + dy * dy;
+
+                        if (distSq < 15000) {
+                            let dist = Math.sqrt(distSq);
+                            ctx.beginPath();
+                            ctx.moveTo(p.x, p.y);
+                            ctx.lineTo(p2.x, p2.y);
+                            ctx.strokeStyle = `rgba(56, 189, 248, ${1 - dist / 122})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
+                requestAnimationFrame(animate);
+            }
+
+            window.addEventListener('resize', init);
+            init();
+            animate();
+        })();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            /* *监听所有 primary 按钮的 hover 事件触发小怪兽* */
+            const bindMonsterEvents = () => {
+                const primaryBtns = document.querySelectorAll('.el-button--primary');
+                const monster = document.querySelector('.cyber-monster') ||
+                    document.getElementById('cyber-monster') ||
+                    document.querySelector('.ai-sentinel');
+
+                if (primaryBtns.length > 0 && monster) {
+                    primaryBtns.forEach(btn => {
+                        if (!btn.dataset.monsterBound) {
+                            btn.dataset.monsterBound = 'true';
+                            btn.addEventListener('mouseenter', () => {
+                                monster.classList.add('active');
+                            });
+                            btn.addEventListener('mouseleave', () => {
+                                monster.classList.remove('active');
+                            });
+                        }
+                    });
+                }
+            };
+
+            const observer = new MutationObserver((mutations) => {
+                let shouldRebind = false;
+                for (let mutation of mutations) {
+                    if (mutation.addedNodes.length > 0) {
+                        shouldRebind = true;
+                        break;
+                    }
+                }
+                if (shouldRebind) bindMonsterEvents();
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+            bindMonsterEvents();
+        });
+    </script>
+</body>
+
+</html>

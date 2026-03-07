@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white py-3 border-0">
+        <h5 class="mb-0 fw-bold"><i class="fas fa-list-alt me-2"></i>评论情感数据库</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>用户昵称</th>
+                        <th>评论内容</th>
+                        <th>IP属地</th>
+                        <th>情感得分</th>
+                        <th>情感标签</th>
+                        <th>评论时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for comment in page_obj %}
+                    <tr>
+                        <td class="fw-bold text-secondary">{{ comment.nickname }}</td>
+                        <td style="max-width: 300px;" class="text-truncate" title="{{ comment.content }}">
+                            {{ comment.content }}
+                        </td>
+                        <td><span class="badge bg-light text-dark border">{{ comment.ip_label }}</span></td>
+                        <td>
+                            {% if comment.sentiment_score > 0.6 %}
+                                <span class="text-success fw-bold">{{ comment.sentiment_score }}</span>
+                            {% elif comment.sentiment_score < 0.4 %}
+                                <span class="text-danger fw-bold">{{ comment.sentiment_score }}</span>
+                            {% else %}
+                                <span class="text-warning fw-bold">{{ comment.sentiment_score }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ comment.sentiment_label }}</td>
+                        <td class="text-muted small">{{ comment.create_time|date:"Y-m-d" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="text-center py-4">暂无数据</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        {% if page_obj.has_other_pages %}
+        <nav aria-label="Page navigation" class="mt-4">
+            <ul class="pagination justify-content-center">
+                {% if page_obj.has_previous %}
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">上一页</a></li>
+                {% endif %}
+                <li class="page-item disabled"><span class="page-link">第 {{ page_obj.number }} 页</span></li>
+                {% if page_obj.has_next %}
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">下一页</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

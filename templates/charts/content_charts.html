@@ -1,0 +1,290 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}4D深度视觉分析{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <!-- *顶部：核心组件提示与说明* -->
+    <div class="card shadow-sm mb-4"
+        style="background: rgba(13, 17, 23, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(0, 255, 255, 0.2);">
+        <div class="card-header text-white" style="background: linear-gradient(90deg, #ff0050, #00f2fe);">
+            <h5 class="mb-0"><i class="bi bi-camera-video"></i> 视觉与音频 DNA 分析引擎</h5>
+        </div>
+        <div class="card-body text-light">
+            <p class="mb-0">基于计算机视觉与音频特征提取技术，解析当前主题下高爆款视频的特征分布（亮度、饱和度、BPM节奏、剪辑频率）。所有数据均来自于成功分析的真实视频库，展示与点赞的深度相关性。</p>
+        </div>
+    </div>
+
+    {% if no_data %}
+    <!-- *空状态发光警告卡片* -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-lg border-warning"
+                style="background: rgba(255, 193, 7, 0.1); box-shadow: 0 0 15px rgba(255, 193, 7, 0.5);">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-robot fs-1 text-warning mb-3"
+                        style="text-shadow: 0 0 10px rgba(255, 193, 7, 0.8);"></i>
+                    <h4 class="text-warning mb-3" style="text-shadow: 0 0 5px rgba(255, 193, 7, 0.5);">AI is analyzing
+                        the data...</h4>
+                    <p class="text-light mb-0">当前主题的数据正在提取多模态特征，请等待分析完成。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- *中间：双卡片结构（雷达图、双轴相关性散点图）* -->
+    <div class="row">
+        <!-- *雷达图：DNA Profile Top 10* -->
+        <div class="col-md-5 mb-4">
+            <div class="card shadow-sm h-100"
+                style="background: rgba(15, 20, 30, 0.9); border: 1px solid rgba(255, 0, 80, 0.3);">
+                <div class="card-header text-white"
+                    style="background: rgba(255, 0, 80, 0.1); border-bottom: 1px solid rgba(255, 0, 80, 0.3);">
+                    <h6 class="mb-0" style="color: #ff0050; text-shadow: 0 0 5px rgba(255,0,80,0.5);">赛道 Top 10 爆款多模态
+                        DNA</h6>
+                </div>
+                <div class="card-body">
+                    <div id="radarChart" style="width:100%; height:450px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- *散点图：视觉亮度与点赞相关性* -->
+        <div class="col-md-7 mb-4">
+            <div class="card shadow-sm h-100"
+                style="background: rgba(15, 20, 30, 0.9); border: 1px solid rgba(0, 242, 254, 0.3);">
+                <div class="card-header text-white"
+                    style="background: rgba(0, 242, 254, 0.1); border-bottom: 1px solid rgba(0, 242, 254, 0.3);">
+                    <h6 class="mb-0" style="color: #00f2fe; text-shadow: 0 0 5px rgba(0,242,254,0.5);">爆款成功公式（亮度 vs 互动量）
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div id="scatterChart" style="width:100%; height:450px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- *底部：音频与节奏分布柱状图* -->
+    <div class="row">
+        <!-- *视觉饱和度特征分布* -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm"
+                style="background: rgba(20, 20, 25, 0.9); border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="card-header text-white" style="background: transparent;">
+                    <h6 class="mb-0 text-info">视觉色彩饱和度分布特征</h6>
+                </div>
+                <div class="card-body">
+                    <div id="saturationChart" style="width:100%; height:300px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- *音频 BPM 节奏分布* -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm"
+                style="background: rgba(20, 20, 25, 0.9); border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="card-header text-white" style="background: transparent;">
+                    <h6 class="mb-0" style="color: #e5a93e;">音频 BPM 节奏特征分布</h6>
+                </div>
+                <div class="card-body">
+                    <div id="bpmChart" style="width:100%; height:300px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+{% if not no_data %}
+<script id="chart-data-topDna" type="application/json">{{ top_dna_json|safe }}</script>
+<script id="chart-data-engagement" type="application/json">{{ engagement_map_json|safe }}</script>
+<script id="chart-data-visual" type="application/json">{{ visual_dist_json|safe }}</script>
+<script id="chart-data-audio" type="application/json">{{ audio_dist_json|safe }}</script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // *解析来自后端的数据*
+        const topDnaData = JSON.parse(document.getElementById('chart-data-topDna').textContent);
+        const engagementMapData = JSON.parse(document.getElementById('chart-data-engagement').textContent);
+        const visualDist = JSON.parse(document.getElementById('chart-data-visual').textContent);
+        const audioDist = JSON.parse(document.getElementById('chart-data-audio').textContent);
+
+        // *====== 1. 雷达图：Top 10 DNA ======*
+        const radarChart = echarts.init(document.getElementById('radarChart'));
+        const radarSeriesData = topDnaData.map((item, index) => {
+            // *利用霓虹色系轮盘*
+            const colors = ['#ff0050', '#00f2fe', '#feca57', '#a55eea', '#20bf6b', '#eb3b5a', '#fa8231', '#0fb9b1', '#4b7bec', '#a5b1c2'];
+            return {
+                value: item.value,
+                name: item.name,
+                lineStyle: { width: 1.5, opacity: 0.8 },
+                itemStyle: { color: colors[index % colors.length] },
+                areaStyle: { opacity: 0.1 }
+            };
+        });
+
+        radarChart.setOption({
+            tooltip: { trigger: 'item' },
+            legend: {
+                type: 'scroll',
+                bottom: 0,
+                textStyle: { color: '#aaa' },
+                data: topDnaData.map(item => item.name)
+            },
+            radar: {
+                indicator: [
+                    { name: '视觉亮度 (Brightness)', max: 255 },
+                    { name: '视觉饱和度 (Saturation)', max: 255 },
+                    { name: '音频节奏 (BPM)', max: 200 },
+                    { name: '剪辑频率 (Cut Freq x100)', max: 100 },
+                    { name: '综合互动指数 (归一化)', max: 100 }
+                ],
+                shape: 'polygon',
+                splitNumber: 4,
+                axisName: { color: '#00f2fe', fontSize: 13, textShadow: '0 0 5px rgba(0,242,254,0.5)' },
+                splitLine: {
+                    lineStyle: { color: ['rgba(0, 242, 254, 0.1)', 'rgba(0, 242, 254, 0.2)', 'rgba(0, 242, 254, 0.4)', 'rgba(0, 242, 254, 0.6)'] }
+                },
+                splitArea: { show: false },
+                axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } }
+            },
+            series: [{
+                type: 'radar',
+                data: radarSeriesData
+            }]
+        });
+
+        // *====== 2. 散点图：视觉亮度 vs 互动量 ======*
+        const scatterChart = echarts.init(document.getElementById('scatterChart'));
+        scatterChart.setOption({
+            tooltip: {
+                trigger: 'item',
+                formatter: function (params) {
+                    return '亮度: ' + params.value[0].toFixed(2) + '<br/>点赞: ' + params.value[1];
+                }
+            },
+            xAxis: {
+                name: '画面亮度 (0-255)',
+                nameTextStyle: { color: '#aaa' },
+                type: 'value',
+                axisLine: { lineStyle: { color: '#666' } },
+                splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } },
+                axisLabel: { color: '#aaa' }
+            },
+            yAxis: {
+                name: '点赞量',
+                nameTextStyle: { color: '#aaa' },
+                type: 'value',
+                axisLine: { lineStyle: { color: '#666' } },
+                splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } },
+                axisLabel: { color: '#aaa' }
+            },
+            series: [{
+                symbolSize: 12,
+                data: engagementMapData,
+                type: 'scatter',
+                itemStyle: {
+                    color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
+                        { offset: 0, color: '#00f2fe' },
+                        { offset: 1, color: '#ff0050' }
+                    ]),
+                    shadowBlur: 10,
+                    shadowColor: 'rgba(0, 242, 254, 0.5)'
+                }
+            }]
+        });
+
+        // *====== 3. 柱状图：视觉色彩饱和度分布 ======*
+        const saturationChart = echarts.init(document.getElementById('saturationChart'));
+        saturationChart.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '5%', right: '5%', bottom: '10%', top: '15%', containLabel: true },
+            xAxis: {
+                type: 'category',
+                data: ['低饱和 (0-85)', '中饱和 (86-170)', '高饱和 (171-255)'],
+                axisLine: { lineStyle: { color: '#666' } },
+                axisLabel: { color: '#aaa' }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { lineStyle: { color: '#666' } },
+                splitLine: { lineStyle: { type: 'dashed', color: 'rgba(255,255,255,0.05)' } },
+                axisLabel: { color: '#aaa' }
+            },
+            series: [{
+                name: '视频数量',
+                type: 'bar',
+                barWidth: '40%',
+                data: [visualDist.saturation.low, visualDist.saturation.mid, visualDist.saturation.high],
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: '#00d2ff' },
+                        { offset: 1, color: '#3a7bd5' }
+                    ]),
+                    borderRadius: [4, 4, 0, 0]
+                }
+            }]
+        });
+
+        // *====== 4. 柱状图：音频 BPM 节奏特征分布 ======*
+        const bpmChart = echarts.init(document.getElementById('bpmChart'));
+        bpmChart.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '5%', right: '5%', bottom: '10%', top: '15%', containLabel: true },
+            xAxis: {
+                type: 'category',
+                data: ['舒缓 (<100)', '适中 (100-140)', '快节奏 (>140)'],
+                axisLine: { lineStyle: { color: '#666' } },
+                axisLabel: { color: '#aaa' }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { lineStyle: { color: '#666' } },
+                splitLine: { lineStyle: { type: 'dashed', color: 'rgba(255,255,255,0.05)' } },
+                axisLabel: { color: '#aaa' }
+            },
+            series: [{
+                name: '视频数量',
+                type: 'bar',
+                barWidth: '40%',
+                data: [audioDist.bpm.slow, audioDist.bpm.norm, audioDist.bpm.fast],
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: '#f6d365' },
+                        { offset: 1, color: '#fda085' }
+                    ]),
+                    borderRadius: [4, 4, 0, 0]
+                }
+            }]
+        });
+
+        // *窗口响应尺寸重置 (防抖处理)*
+        let chartResizeTimer = null;
+        window.addEventListener('resize', function () {
+            if (chartResizeTimer) {
+                clearTimeout(chartResizeTimer);
+            }
+            chartResizeTimer = setTimeout(function () {
+                radarChart.resize();
+                scatterChart.resize();
+                saturationChart.resize();
+                bpmChart.resize();
+            }, 200);
+        });
+    });
+</script>
+{% endif %}
+<style>
+    /* *强化赛博朋克深色 UI* */
+    body {
+        background-color: #0b0f19;
+    }
+
+    .card {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+</style>
+{% endblock %}
