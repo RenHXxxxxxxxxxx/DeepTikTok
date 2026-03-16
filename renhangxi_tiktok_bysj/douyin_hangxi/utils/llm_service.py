@@ -26,43 +26,21 @@ class LLMService:
         return cls._instance
 
     def _init_client(self):
-        # *利用 os.getenv 获取 DeepSeek API Key，增强安全性*
-        self.api_key = os.getenv("DEEPSEEK_API_KEY")
-        
-        # *校验 api_key 是否存在*
-        if self.api_key is None:
-            raise ValueError("*项目根目录 .env 文件中缺少 DEEPSEEK_API_KEY 或加载失败*")
-            
-        print(f"DEBUG: LLMService initialized with Key ending in ...{self.api_key[-4:]}")
-        
+        # *全局开发密钥后退机制已被彻底移除，实现严格的用户级密钥隔离*
         self.base_url = GLOBAL_CONFIG["BASE_URL"]
-
-        try:
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
-        except Exception:
-            self._client = None
 
     def generate_advice(self, data, user_key=None, model_name=None):
         # *生成运营建议*
-        actual_key = user_key if user_key else self.api_key
-        
+        if not user_key or not str(user_key).strip():
+            raise PermissionError("API Key not configured. Please set your credentials in the Profile page.")
+            
         # [核心修复]：无视外界传来的 model_name，强制使用全局配置的 deepseek-chat
         actual_model = GLOBAL_CONFIG["DEFAULT_MODEL"]
         
-        client = None
-        if not user_key:
-            client = self._client
-        else:
-            try:
-                client = OpenAI(api_key=actual_key, base_url=self.base_url)
-            except Exception:
-                client = self._client
-                # 这里不需要再给 actual_model 赋值了，上面已经锁死了
-                
-        if not client: return "*AI 诊断模块暂时不可用。*"
+        try:
+            client = OpenAI(api_key=str(user_key).strip(), base_url=self.base_url)
+        except Exception:
+            return "*AI 诊断模块暂时不可用。*"
 
         # *提取数据并设置默认值*
         brightness_val = data.get('visual_brightness', 0)

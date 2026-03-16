@@ -1268,6 +1268,11 @@ def profile_view(request):
             api_key = request.POST.get('api_key', '').strip()
             model_name = request.POST.get('model_name', 'ernie-4.0-8k').strip()
             
+            # *API 密钥正则验证，拦截非规范格式*
+            if api_key and not re.match(r'^sk-[a-zA-Z0-9]{32,64}$', api_key):
+                messages.error(request, "Invalid API Key format. Please use the standard 'sk-...' format.")
+                return redirect('profile')
+            
             # *获取或创建用户配置*
             config, _ = CreatorConfig.objects.get_or_create(user=request.user)
             if api_key:
