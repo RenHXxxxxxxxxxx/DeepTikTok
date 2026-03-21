@@ -13,7 +13,7 @@ from pathlib import Path
 from django.db.models import Avg
 from sklearn.model_selection import train_test_split, ParameterGrid, cross_val_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score, root_mean_squared_error
+from sklearn.metrics import r2_score, root_mean_squared_error, mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 import lightgbm as lgb
 import xgboost as xgb
@@ -249,6 +249,11 @@ def deploy_new_champion(challenger_model, challenger_scaler, metadata):
             'test_r2': metadata['test_r2'],
             'hyperparameters': metadata['hyperparameters']
         }
+
+        if 'feature_names_in' in metadata and metadata['feature_names_in']:
+            new_manifest['feature_names_in'] = metadata['feature_names_in']
+        if 'bayesian_global_mean' in metadata:
+            new_manifest['bayesian_global_mean'] = metadata['bayesian_global_mean']
         
         if 'feature_importances' in metadata and metadata['feature_importances']:
             new_manifest['feature_importances'] = metadata['feature_importances']
@@ -303,28 +308,41 @@ def build_master_arena():
             print("[ERROR] No valid samples after rare theme filtering.")
             return
 
-        # *第一步：识别活跃主题（主角）*
         active_theme = identify_active_theme(df)
-
-        # *第二步：构建"目标与陪衬"偏置数据集*
-        df_biased, target_count, foil_count = build_target_foil_dataset(
-            df, active_theme, GLOBAL_CONFIG['target_ratio'], GLOBAL_CONFIG['random_state']
-        )
+        # *禁用偏置采样，释放全量 2147 条数据进行全局训练*
+        df_biased = df.copy()
+        target_count = len(df_biased[df_biased['theme_label'] == active_theme])
+        foil_count = len(df_biased) - target_count
 
         # *基础特征工程（在偏置数据集上执行）*
         df_biased['duration_sec'] = df_biased['duration'].apply(convert_duration_to_seconds)
         df_biased['publish_hour'] = pd.to_datetime(df_biased['create_time']).dt.hour
 
-        # *处理离散主题特征，依据要求保留get_dummies形式不使用OneHotEncoder*
+        # *对长尾偏态特征(粉丝数)进行对数变换，稳定梯度*
+        df_biased['follower_count_log'] = np.log1p(df_biased['follower_count'])
+
+        # *核心：贝叶斯目标编码 (Bayesian Target Encoding) 替代独热编码*
+        df_biased['temp_digg_log'] = np.log1p(df_biased['digg_count'])
+        global_mean = df_biased['temp_digg_log'].mean()
+        weight = 10.0 # 平滑系数
+
+        theme_stats = df_biased.groupby('theme_label')['temp_digg_log'].agg(['count', 'mean']).reset_index()
+        theme_stats.rename(columns={'mean': 'local_mean'}, inplace=True)
+        theme_stats['theme_encoded'] = (theme_stats['count'] * theme_stats['local_mean'] + weight * global_mean) / (theme_stats['count'] + weight)
+
+        df_biased = df_biased.merge(theme_stats[['theme_label', 'theme_encoded']], on='theme_label', how='left')
+        df_biased.drop(columns=['temp_digg_log'], inplace=True)
+
+        # *恢复动态多维特征空间（独热编码矩阵）*
         theme_dummies = pd.get_dummies(df_biased['theme_label'], prefix='theme')
         known_theme_cols = theme_dummies.columns.tolist()
         df_biased = pd.concat([df_biased, theme_dummies], axis=1)
 
-        # *聚合所有基础特征（不含标签）*
+        # *聚合所有基础特征，保留动态扩充的主题多维空间*
         base_features = [
-            'duration_sec', 'follower_count', 'publish_hour',
+            'duration_sec', 'follower_count_log', 'publish_hour',
             'avg_sentiment', 'visual_brightness', 'visual_saturation',
-            'cut_frequency', 'audio_bpm'
+            'cut_frequency', 'audio_bpm', 'theme_encoded'
         ] + known_theme_cols
 
         X = df_biased[base_features].copy()
@@ -349,6 +367,11 @@ def build_master_arena():
         # *拷贝以防止视图修改警告*
         X_train = X_train.copy()
         X_test = X_test.copy()
+
+        # *仅在训练集上计算粉丝对数特征P99并同步截断训练/测试集，避免长尾畸变与泄露*
+        p99_follower = X_train['follower_count_log'].quantile(0.99)
+        X_train.loc[:, 'follower_count_log'] = X_train['follower_count_log'].clip(upper=p99_follower)
+        X_test.loc[:, 'follower_count_log'] = X_test['follower_count_log'].clip(upper=p99_follower)
 
         # *仅在训练集上计算阈值并应用截断，防止目标变量泄露*
         cap_value = pd.Series(y_train_orig_pre).quantile(GLOBAL_CONFIG['cap_quantile'])
@@ -375,11 +398,14 @@ def build_master_arena():
             ds.loc[:, 'audio_visual_energy'] = ds['visual_brightness'] * ds['audio_bpm'] / 1000.0
             ds.loc[:, 'content_density'] = ds['cut_frequency'] / (ds['duration_sec'] + 1)
 
+        # *================ 修复点：对齐最新的高阶特征，保留动态多维矩阵 ================*
         feature_cols = [
-            'duration_sec', 'follower_count', 'publish_hour',
+            'duration_sec', 'follower_count_log', 'publish_hour',
             'avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm',
+            'theme_encoded',
             'visual_impact', 'sensory_pace', 'sentiment_intensity', 'audio_visual_energy', 'content_density'
         ] + known_theme_cols
+        # *=========================================================*
 
         X_train = X_train[feature_cols]
         X_test = X_test[feature_cols]
@@ -455,10 +481,11 @@ def build_master_arena():
             X_test_scaled_new = new_scaler.transform(X_test)
             y_pred_log = final_model.predict(X_test_scaled_new)
             y_pred_log = np.clip(y_pred_log, 0, GLOBAL_CONFIG['clip_max'])
-            y_pred_orig_scale = np.expm1(y_pred_log)
-
-            test_rmse = root_mean_squared_error(y_test_orig, y_pred_orig_scale)
-            test_r2 = r2_score(y_test_orig, y_pred_orig_scale)
+            # *核心修复：在对数空间进行评估，避免长尾指数爆炸*
+            y_test_log = np.log1p(y_test_orig)
+            test_rmse = root_mean_squared_error(y_test_log, y_pred_log)
+            test_r2 = r2_score(y_test_log, y_pred_log)
+            test_mae = mean_absolute_error(y_test_log, y_pred_log)
 
             trained_estimators[model_name] = {
                 'model': final_model,
@@ -467,9 +494,10 @@ def build_master_arena():
             internal_leaderboard.append({
                 'Model': model_name,
                 'RMSE': test_rmse,
-                'R2': test_r2
+                'R2': test_r2,
+                'MAE': test_mae
             })
-            print(f" -> RMSE: {test_rmse:.4f} | R2: {test_r2:.4f}")
+            print(f" -> RMSE: {test_rmse:.4f} | MAE: {test_mae:.4f} | R2: {test_r2:.4f}")
 
         except Exception as e:
             # *异常处理允许个别失败但不整体崩溃*
@@ -512,6 +540,8 @@ def build_master_arena():
         'hyperparameters': trained_estimators[challenger_name]['params'],
         'feature_importances': feat_importances
     }
+    challenger_metadata['feature_names_in'] = list(X_train.columns)
+    challenger_metadata['bayesian_global_mean'] = float(global_mean)
 
     if not champion_model or not champion_scaler:
         print("[INFO] No existing champion found. Graceful Fallback -> Promoting Challenger to Champion.")
@@ -527,7 +557,8 @@ def build_master_arena():
         challenger_preds_log = challenger_model.predict(X_test_scaled_challenger)
         challenger_preds_log = np.clip(challenger_preds_log, 0, GLOBAL_CONFIG['clip_max'])
         challenger_preds = np.expm1(challenger_preds_log)
-        challenger_final_rmse = root_mean_squared_error(y_test_orig, challenger_preds)
+        challenger_final_rmse = root_mean_squared_error(np.log1p(y_test_orig), challenger_preds_log)
+        challenger_final_mae = mean_absolute_error(np.log1p(y_test_orig), challenger_preds_log)
 
         # *卫冕冠军必须使用其保存时的缩放器应对漂移*
         # *对齐特征列以防新增特征导致维度不匹配*
@@ -551,7 +582,8 @@ def build_master_arena():
         champion_preds_log = champion_model.predict(X_test_scaled_champion)
         champion_preds_log = np.clip(champion_preds_log, 0, GLOBAL_CONFIG['clip_max'])
         champion_preds = np.expm1(champion_preds_log)
-        champion_final_rmse = root_mean_squared_error(y_test_orig, champion_preds)
+        champion_final_rmse = root_mean_squared_error(np.log1p(y_test_orig), champion_preds_log)
+        champion_final_mae = mean_absolute_error(np.log1p(y_test_orig), champion_preds_log)
         
     except Exception as e:
         print(f"[ERROR] Showdown evaluation failed: {str(e)}")
@@ -560,8 +592,8 @@ def build_master_arena():
         print("⛔ System retaining existing Champion due to evaluation error.")
         return
 
-    print(f" -> Challenger ({challenger_name}) RMSE: {challenger_final_rmse:.4f}")
-    print(f" -> Champion (v: {manifest.get('current_version')}) RMSE: {champion_final_rmse:.4f}")
+    print(f" -> Challenger ({challenger_name}) RMSE: {challenger_final_rmse:.4f} | MAE: {challenger_final_mae:.4f}")
+    print(f" -> Champion (v: {manifest.get('current_version')}) RMSE: {champion_final_rmse:.4f} | MAE: {champion_final_mae:.4f}")
 
     # *---------------- Step 4: Atomic Deployment & Telemetry ----------------*
     margin = GLOBAL_CONFIG['win_margin']
@@ -569,7 +601,8 @@ def build_master_arena():
         print(f"\n[VICTORY] Challenger outperformed Champion by at least {margin}! Proceeding to deployment.")
         # *实时以最终评估成绩覆盖元数据*
         challenger_metadata['test_rmse'] = challenger_final_rmse
-        challenger_metadata['test_r2'] = r2_score(y_test_orig, challenger_preds)
+        challenger_metadata['test_r2'] = r2_score(np.log1p(y_test_orig), challenger_preds_log)
+        challenger_metadata['test_mae'] = challenger_final_mae
         deploy_new_champion(challenger_model, new_scaler, challenger_metadata)
     else:
         print(f"\n⛔ Challenger failed. System retaining existing Champion.")

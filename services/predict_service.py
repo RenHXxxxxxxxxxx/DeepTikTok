@@ -67,9 +67,9 @@ class DiggPredictionService:
 
         # 默认基础特征拓扑
         self.base_features = [
-            'follower_count', 'publish_hour', 'duration_sec',
+            'follower_count_log', 'publish_hour', 'duration_sec',
             'visual_brightness', 'visual_saturation', 'cut_frequency',
-            'audio_bpm', 'avg_sentiment', 'visual_impact', 'sensory_pace',
+            'audio_bpm', 'avg_sentiment', 'theme_encoded', 'visual_impact', 'sensory_pace',
             'sentiment_intensity', 'audio_visual_energy', 'content_density'
         ]
         self.ordered_feature_names = []
@@ -122,11 +122,10 @@ class DiggPredictionService:
                 self.model = joblib.load(model_path)
                 self.scaler = joblib.load(scaler_path)
                 
-                # 动态提取特征拓扑，优先从模型重要性字典提取，次之用默认
+                # 动态提取特征拓扑，优先使用 manifest 显式列序，其次回退到重要性字典键序
                 feat_dict = self.manifest.get('feature_importances', {})
-                if feat_dict:
-                    self.ordered_feature_names = list(feat_dict.keys())
-                else:
+                self.ordered_feature_names = self.manifest.get('feature_names_in', list(feat_dict.keys()))
+                if not self.ordered_feature_names:
                     self.ordered_feature_names = self.base_features
                     
                 self._manifest_mtime = self.manifest_path.stat().st_mtime
@@ -154,15 +153,17 @@ class DiggPredictionService:
         except:
             return default
 
-    def _build_features(self, video_data: dict) -> pd.DataFrame:
+    def _build_features(self, video_data: dict, theme_baseline: dict = None) -> pd.DataFrame:
         """特征合成器：从原始 JSON 提取并构建符合拓扑维度的 DataFrame"""
-        # 1. 键名中文化映射
+        # *1. 键名中文化映射*
         for cn_key, en_key in GLOBAL_CONFIG['CHINESE_MAPPING'].items():
             if cn_key in video_data:
                 video_data[en_key] = video_data.pop(cn_key)
 
-        # 2. 基础物理特征提取
-        fol = self._safe_float(video_data.get('follower_count'))
+        # *2. 基础物理特征提取与对数平滑*
+        fol_raw = self._safe_float(video_data.get('follower_count', 10000))
+        fol_log = np.log1p(fol_raw)
+
         hrr = self._safe_float(video_data.get('publish_hour'))
         dur = self._safe_float(video_data.get('duration_sec'))
         sent = self._safe_float(video_data.get('avg_sentiment', 0.5))
@@ -171,14 +172,22 @@ class DiggPredictionService:
         cf = self._safe_float(video_data.get('cut_frequency', 0.5))
         bpm = self._safe_float(video_data.get('audio_bpm', 110))
 
-        # 3. 构造占位 DataFrame
+        # *2.1 实时贝叶斯目标编码 (Bayesian Target Encoding)*
+        theme_count = float(theme_baseline.get('count', 10)) if theme_baseline else 10.0
+        theme_mean = float(theme_baseline.get('mean', 5000)) if theme_baseline else 5000.0
+        local_mean_log = np.log1p(theme_mean)
+        global_mean_log = float(self.manifest.get('bayesian_global_mean', np.log1p(10000.0)))
+        weight = 10.0
+        theme_enc = (theme_count * local_mean_log + weight * global_mean_log) / (theme_count + weight)
+
+        # *3. 构造占位 DataFrame*
         X_final = pd.DataFrame(0.0, index=[0], columns=self.ordered_feature_names)
 
-        # 4. 衍生特征计算与注入
+        # *4. 衍生特征计算与注入*
         features_to_inject = {
-            'follower_count': fol, 'publish_hour': hrr, 'duration_sec': dur,
+            'follower_count_log': fol_log, 'publish_hour': hrr, 'duration_sec': dur,
             'avg_sentiment': sent, 'visual_brightness': vb, 'visual_saturation': vs,
-            'cut_frequency': cf, 'audio_bpm': bpm,
+            'cut_frequency': cf, 'audio_bpm': bpm, 'theme_encoded': theme_enc,
             'visual_impact': (vb * vs) / 1000.0,
             'sensory_pace': bpm * cf,
             'sentiment_intensity': abs(sent - 0.5) * 2,
@@ -224,7 +233,7 @@ class DiggPredictionService:
 
         try:
             # 1. 抽取特征
-            X_df = self._build_features(video_data)
+            X_df = self._build_features(video_data, theme_baseline)
             
             # 2. 缩放
             X_scaled_ndarray = self.scaler.transform(X_df)
