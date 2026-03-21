@@ -114,6 +114,11 @@
                     </div>
 
                     <div id="resultContent" class="d-none w-100 text-start">
+                        <div class="d-flex justify-content-end mb-3">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="exportPdfBtn">
+                                <i class="fas fa-file-pdf me-1"></i>一键导出 PDF
+                            </button>
+                        </div>
                         <div class="text-center mb-4">
                             <h5 class="text-uppercase text-muted letter-spacing-2 mb-3">PREDICTION RESULT</h5>
                             <div class="p-4 rounded-4"
@@ -167,6 +172,8 @@
     }
 </style>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
 <script>
     // *全局 API 配置 (若外部已定义则复用)*
     const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
@@ -191,6 +198,8 @@
         const videoInput = document.getElementById('videoInput');
         const multiModalForm = document.getElementById('multiModalForm');
         const previewVideo = document.getElementById('previewVideo');
+        const resultCard = document.getElementById('resultCard');
+        const exportPdfBtn = document.getElementById('exportPdfBtn');
 
         dropZone.onclick = () => videoInput.click();
         videoInput.onchange = (e) => handleFile(e.target.files[0]);
@@ -229,6 +238,110 @@
                 const el = document.getElementById(toastId);
                 if (el) el.remove();
             }, 3000);
+        }
+
+        async function exportDiagnosticReportPdf() {
+            if (!resultCard || !window.html2pdf) {
+                showNotification('PDF 组件加载失败，请稍后重试');
+                return;
+            }
+
+            const originalBtnHtml = exportPdfBtn.innerHTML;
+            exportPdfBtn.disabled = true;
+            exportPdfBtn.style.cursor = 'not-allowed';
+            exportPdfBtn.innerHTML = `
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                生成中...
+            `;
+
+            showNotification('Generating PDF...');
+            console.info('Generating PDF...');
+
+            let tempWrapper = null;
+            try {
+                const clonedCard = resultCard.cloneNode(true);
+                const clonedExportBtn = clonedCard.querySelector('#exportPdfBtn');
+                if (clonedExportBtn) {
+                    clonedExportBtn.remove();
+                }
+
+                const originalNodes = Array.from(resultCard.querySelectorAll('*'));
+                const clonedNodes = Array.from(clonedCard.querySelectorAll('*'));
+                clonedNodes.forEach((node, index) => {
+                    const sourceNode = originalNodes[index];
+                    if (!sourceNode || node.nodeType !== 1) return;
+                    const computed = window.getComputedStyle(sourceNode);
+                    const hasGlass = computed.backdropFilter !== 'none' || computed.webkitBackdropFilter !== 'none';
+                    const hasShadow = computed.boxShadow && computed.boxShadow !== 'none';
+                    const bgColor = computed.backgroundColor;
+
+                    node.style.boxShadow = 'none';
+                    node.style.backdropFilter = 'none';
+                    node.style.webkitBackdropFilter = 'none';
+
+                    if (hasGlass || hasShadow) {
+                        if (!bgColor || bgColor === 'rgba(0, 0, 0, 0)' || bgColor === 'transparent') {
+                            node.style.backgroundColor = '#ffffff';
+                        } else {
+                            node.style.backgroundColor = bgColor;
+                        }
+                    }
+
+                    node.style.whiteSpace = 'pre-wrap';
+                    node.style.wordBreak = 'break-all';
+                    node.style.overflowWrap = 'anywhere';
+                });
+
+                const originalCanvases = Array.from(resultCard.querySelectorAll('canvas'));
+                const clonedCanvases = Array.from(clonedCard.querySelectorAll('canvas'));
+                clonedCanvases.forEach((canvasNode, idx) => {
+                    const srcCanvas = originalCanvases[idx];
+                    if (!srcCanvas) return;
+                    const img = document.createElement('img');
+                    img.src = srcCanvas.toDataURL('image/png');
+                    img.style.width = srcCanvas.offsetWidth ? `${srcCanvas.offsetWidth}px` : '100%';
+                    img.style.height = srcCanvas.offsetHeight ? `${srcCanvas.offsetHeight}px` : 'auto';
+                    img.style.maxWidth = '100%';
+                    img.alt = 'canvas-export';
+                    canvasNode.replaceWith(img);
+                });
+
+                tempWrapper = document.createElement('div');
+                tempWrapper.style.position = 'fixed';
+                tempWrapper.style.left = '-100000px';
+                tempWrapper.style.top = '0';
+                tempWrapper.style.width = `${resultCard.offsetWidth || 820}px`;
+                tempWrapper.style.padding = '0';
+                tempWrapper.style.margin = '0';
+                tempWrapper.style.background = '#ffffff';
+                tempWrapper.style.zIndex = '-1';
+                tempWrapper.appendChild(clonedCard);
+                document.body.appendChild(tempWrapper);
+
+                const options = {
+                    margin: 10,
+                    filename: 'AI_Expert_Diagnostic_Report.pdf',
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+
+                await html2pdf().set(options).from(clonedCard).save();
+            } catch (error) {
+                console.error('PDF export failed:', error);
+                showNotification('PDF 生成失败，请稍后重试');
+            } finally {
+                if (tempWrapper && tempWrapper.parentNode) {
+                    tempWrapper.parentNode.removeChild(tempWrapper);
+                }
+                exportPdfBtn.disabled = false;
+                exportPdfBtn.style.cursor = '';
+                exportPdfBtn.innerHTML = originalBtnHtml;
+            }
+        }
+
+        if (exportPdfBtn) {
+            exportPdfBtn.addEventListener('click', exportDiagnosticReportPdf);
         }
 
         multiModalForm.onsubmit = async (e) => {

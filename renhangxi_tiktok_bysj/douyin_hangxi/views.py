@@ -32,6 +32,7 @@ from django.db.models import Avg, Count, Sum, Max, F, Q
 # [修复] 引入 Coalesce 以处理聚合计算中的空值问题
 from django.db.models.functions import Coalesce
 from django.core.cache import cache
+from django.db.utils import OperationalError
 import time
 
 # 导入数据库模型
@@ -55,6 +56,11 @@ from django.contrib import messages
 
 logger = logging.getLogger(__name__)
 
+# *=== 资产精炼工厂全局配置 ===*
+REFINING_CONFIG = {
+    'DATA_DIR_NAME': 'data',
+    'DEFAULT_THEME': '新导入主题'
+}
 
 # *=== 异步 AI 分析后台工作线程 ===*
 class AIAnalysisWorker(threading.Thread):
@@ -592,107 +598,115 @@ def data_warehouse(request):
 # 数据精炼 API：实施强力噪声物理拦截
 @login_required
 def run_clean_data_api(request):
+    # *处理上传的CSV文件流或处理本地物理挂载路径并以事务方式存入数据库*
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': '仅支持 POST 请求'})
 
-    theme_name = request.POST.get('theme_name', '新导入主题').strip()
-    target_v_file = request.POST.get('target_file')
-    target_c_file = request.POST.get('target_comment_file')
-    sentiment_strategy = request.POST.get('sentiment_strategy', 'auto')
+    # *获取目标主题，兼容前端传入的 target_theme 或 theme_name*
+    target_theme = request.POST.get('target_theme') or request.POST.get('theme_name', REFINING_CONFIG['DEFAULT_THEME'])
+    target_theme = target_theme.strip()
 
-    PROJECT_ROOT = settings.BASE_DIR
-    raw_v_path = None
-    if target_v_file:
-        # *[修复] 统一从 data/ 目录读取数据*
-        raw_v_path = os.path.join(PROJECT_ROOT, 'data', target_v_file)
-    raw_c_path = os.path.join(PROJECT_ROOT, 'data', target_c_file)
+    # *获取文件参数，检查 video_csv/comment_csv 并兼容 target_file/target_comment_file*
+    video_csv = request.POST.get('video_csv') or request.POST.get('target_file')
+    comment_csv = request.POST.get('comment_csv') or request.POST.get('target_comment_file')
+    csv_file = request.FILES.get('file')
+
+    if not video_csv and not comment_csv and not csv_file:
+        return JsonResponse({'status': 'error', 'message': '未提供任何数据源文件或路径'})
 
     try:
-        # 处理视频维度数据入库
-        v_count = 0
-        if raw_v_path and os.path.exists(raw_v_path):
+        video_count = 0
+        comment_count = 0
+        
+        # *阶段一：处理视频 CSV (逻辑解耦，支持本地物理路径)*
+        if video_csv or csv_file:
+            if video_csv:
+                # *利用 settings.BASE_DIR 构建绝对物理路径*
+                video_path = os.path.join(settings.BASE_DIR, REFINING_CONFIG['DATA_DIR_NAME'], video_csv)
+                # *安全校验物理文件是否真实存在*
+                if not os.path.exists(video_path):
+                    return JsonResponse({'status': 'error', 'message': f'视频物理文件未找到: {video_path}'})
+                # *Update the Pandas reading logic to handle local path strings.*
+                df = pd.read_csv(video_path, dtype={'视频ID': str, 'video_id': str})
+            else:
+                # *兼容传统的 Upload Stream 方式*
+                df = pd.read_csv(csv_file, dtype={'视频ID': str, 'video_id': str})
+            
+            # *列名动态映射，增强健壮性*
             v_col_map = {
-                '用户名': 'nickname', '粉丝数量': 'follower_count', 'follower_count': 'follower_count',
-                '视频描述': 'desc', '视频ID': 'video_id', '发表时间': 'create_time',
-                '视频时长': 'duration', '点赞数量': 'digg_count', 'digg_count': 'digg_count',
-                '收藏数量': 'collect_count', '评论数量': 'comment_count',
-                'share_count': 'share_count', '下载数量': 'download_count', '本地路径': 'video_file'
+                '用户名': 'nickname', '粉丝数量': 'follower_count', '视频描述': 'desc', 
+                '视频ID': 'video_id', '发表时间': 'create_time', '视频时长': 'duration', 
+                '点赞数量': 'digg_count', '收藏数量': 'collect_count', '评论数量': 'comment_count',
+                '下载数量': 'download_count', '本地路径': 'video_file', '分享数量': 'share_count'
             }
-            for df_v_chunk in pd.read_csv(raw_v_path, dtype={'视频ID': str}, chunksize=5000):
-                df_v = df_v_chunk.rename(columns={k: v for k, v in v_col_map.items() if k in df_v_chunk.columns})
-                with transaction.atomic():
-                    for _, row in df_v.iterrows():
-                        vid = str(row['video_id'])
-                        if 'visual_brightness' in df_v.columns:
-                            ai_features = {'brightness': row.get('visual_brightness', 0.0),
-                                           'saturation': row.get('visual_saturation', 0.0), 'bpm': row.get('audio_bpm', 0.0),
-                                           'cut_freq': row.get('cut_frequency', 0.0)}
-                        else:
-                            video_rel_path = row.get('video_file', '')
-                            video_abs_path = os.path.join(PROJECT_ROOT, video_rel_path)
-                            ai_features = {'brightness': 0.0, 'saturation': 0.0, 'bpm': 0.0, 'cut_freq': 0.0}
-                            if video_rel_path and os.path.exists(video_abs_path):
-                                try:
-                                    analyzer = VideoContentAnalyzer(video_abs_path)
-                                    ai_features = analyzer.run_full_analysis()
-                                except:
-                                    pass
-                        Video.objects.update_or_create(video_id=vid, defaults={
-                            'theme_label': theme_name, 'nickname': str(row.get('nickname', '未知作者')),
-                            'desc': str(row.get('desc', '')), 'follower_count': int(row.get('follower_count', 0)),
-                            'digg_count': int(row.get('digg_count', 0)), 'comment_count': int(row.get('comment_count', 0)),
-                            'collect_count': int(row.get('collect_count', 0)), 'share_count': int(row.get('share_count', 0)),
+            df = df.rename(columns={k: v for k, v in v_col_map.items() if k in df.columns})
+
+            # *全局空值填补防范数据结构破坏*
+            df = df.fillna({
+                'follower_count': 0, 'digg_count': 0, 'comment_count': 0, 
+                'collect_count': 0, 'share_count': 0, 'visual_brightness': 0.0,
+                'visual_saturation': 0.0, 'audio_bpm': 0, 'cut_frequency': 0.0
+            })
+
+            # *安全的类型转换助手，防范 NaN 及 None*
+            safe_int = lambda x: int(float(x)) if x is not None and str(x).lower() != 'nan' else 0
+
+            # *确保批量更新过程具备原子性*
+            with transaction.atomic():
+                for _, row in df.iterrows():
+                    vid = str(row.get('video_id', ''))
+                    if not vid or vid.lower() == 'nan':
+                        continue
+
+                    # *根据指定的主键实现覆盖式的幂等创建，深度绑定用户输入的 target_theme*
+                    Video.objects.update_or_create(
+                        video_id=vid,
+                        defaults={
+                            'theme_label': target_theme,
+                            'nickname': str(row.get('nickname', '未知作者')),
+                            'desc': str(row.get('desc', '')),
+                            'follower_count': safe_int(row.get('follower_count')),
+                            'digg_count': safe_int(row.get('digg_count')),
+                            'comment_count': safe_int(row.get('comment_count')),
+                            'collect_count': safe_int(row.get('collect_count')),
+                            'share_count': safe_int(row.get('share_count')),
                             'duration': str(row.get('duration', '00:00')),
                             'create_time': pd.to_datetime(row.get('create_time', datetime.now())),
-                            'video_file': row.get('video_file', ''), 'visual_brightness': ai_features.get('brightness', 0.0),
-                            'visual_saturation': ai_features.get('saturation', 0.0),
-                            'audio_bpm': int(ai_features.get('bpm', 0.0)),
-                            'cut_frequency': ai_features.get('cut_freq', 0.0),
-                        })
-                        v_count += 1
+                            'video_file': str(row.get('video_file', '')),
+                            'visual_brightness': float(row.get('visual_brightness')),
+                            'visual_saturation': float(row.get('visual_saturation')),
+                            'audio_bpm': safe_int(row.get('audio_bpm')),
+                            'cut_frequency': float(row.get('cut_frequency')),
+                        }
+                    )
+            video_count = len(df)
+            
+        # *阶段二：处理关联的评论 CSV (解耦逻辑，直接基于物理路径)*
+        if comment_csv:
+            comment_path = os.path.join(settings.BASE_DIR, REFINING_CONFIG['DATA_DIR_NAME'], comment_csv)
+            # *校验评论物理文件是否存在*
+            if not os.path.exists(comment_path):
+                return JsonResponse({'status': 'error', 'message': f'评论物理文件未找到: {comment_path}'})
+            
+            # *解析本地物理文件，分块流式读取处理*
+            for df_comment_chunk in pd.read_csv(comment_path, dtype={'视频ID': str, 'video_id': str, '评论ID': str, 'comment_id': str}, chunksize=5000):
+                if df_comment_chunk.empty:
+                    continue
+                comment_records = df_comment_chunk.to_dict('records')
+                # *依赖UnifiedPersistenceManager进行批量持久化*
+                manager = UnifiedPersistenceManager()
+                inserted = manager.save_comment_batch(comment_records, target_theme)
+                comment_count += inserted
 
-        # 处理评论数据入库
-        c_count = 0
-        if target_c_file and os.path.exists(raw_c_path):
-            video_pool = {v.video_id: v for v in Video.objects.filter(theme_label=theme_name)}
-            if not video_pool: return JsonResponse({'status': 'error', 'message': '未找到匹配的主题视频数据'})
-            for df_c_chunk in pd.read_csv(raw_c_path, dtype={'视频ID': str, '评论ID': str}, chunksize=5000):
-                with transaction.atomic():
-                    for _, row in df_c_chunk.iterrows():
-                        cid, vid = str(row.get('评论ID', row.get('comment_id'))), str(row.get('视频ID', row.get('video_id')))
-                        if vid in video_pool:
-                            raw_content = str(row.get('评论内容', row.get('content', '')))
-                            cleaned_raw = clean_text_nuclear(raw_content)
-                            tokenized_text = str(row.get('分词文本', row.get('segmented_text', '')))
-                            if tokenized_text == 'nan': tokenized_text = ""
-        
-                            # *优先使用已有分词结果，否则请求 TF-IDF 算法提取特征词组*
-                            if sentiment_strategy != 'raw' and tokenized_text.strip():
-                                analysis_target = tokenized_text
-                            else:
-                                analysis_target = extract_semantic_features(cleaned_raw)
-        
-                            # 噪声拦截阈值 (修正：放宽至 1 个字符，允许“好”、“强”等短语)
-                            if not analysis_target.strip() or len(analysis_target.strip()) < 1:
-                                continue
-        
-                            sentiment_score, sentiment_label = calculate_refined_sentiment(analysis_target)
-        
-                            Comment.objects.update_or_create(comment_id=cid, defaults={
-                                'video': video_pool[vid], 'theme_label': theme_name, 'nickname': str(row.get('用户名', '匿名')),
-                                'content': raw_content, 'content_clean': analysis_target,
-                                'create_time': pd.to_datetime(row.get('评论时间', datetime.now())),
-                                'ip_label': str(row.get('IP属地', '未知')),
-                                'digg_count': int(row.get('点赞数', 0)), 'sentiment_score': sentiment_score,
-                                'sentiment_label': sentiment_label,
-                                'hour': pd.to_datetime(row.get('评论时间', datetime.now())).hour,
-                                'text_len': len(analysis_target)
-                            })
-                            c_count += 1
-        return JsonResponse(
-            {'status': 'success', 'message': f'精炼完成，同步视频 {v_count} 条，解析有效评论 {c_count} 条。'})
+        return JsonResponse({'status': 'success', 'message': f'资产精炼执行完毕，同步视频 {video_count} 条，评论 {comment_count} 条。'})
+
+    except OperationalError:
+        # *处理SQLite因并发写引发的写锁错误*
+        return JsonResponse({"status": "error", "message": "Database is currently busy (Locked). Please try again."}, status=503)
     except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)})
+        # *捕获任何因为无效脏数据造成的崩溃点并拒绝保存*
+        logger.error(f"[Refining] *数据精炼流程异常崩溃: {e}*")
+        return JsonResponse({"status": "error", "message": f"Transaction rolled back due to invalid data: {str(e)}"}, status=400)
 
 
 # 情感分重算接口：强制全量修复 (Retroactive Repair)
@@ -1122,104 +1136,110 @@ def predict_api(request):
             for chunk in video_obj.chunks():
                 f.write(chunk)
 
-        analyzer = VideoContentAnalyzer(temp_path)
-        hw = analyzer.run_full_analysis()
-
-        # *构建特征数据字典*
-        p_data = {
-            'visual_brightness': hw.get('visual_brightness', 128),
-            'visual_saturation': hw.get('visual_saturation', 100),
-            'audio_bpm': hw.get('audio_bpm', 110),
-            'cut_frequency': hw.get('cut_frequency', 0.5),
-            'duration_sec': hw.get('duration_sec', 15),
-            'follower_count': follower_count,
-            'publish_hour': publish_hour,
-            'avg_sentiment': 0.5,
-            'collect_count': 0,
-            'comment_count': 0,
-            'share_count': 0,
-            'script_keywords': hw.get('script_keywords', []),
-            # *[NEW] 注入当前选择的主题供模型特征工程使用*
-            'theme_label': request.POST.get('theme_name', 'Unknown')
-        }
-        print(f"📦 [Audit B: p_data_Built] -> {p_data}")
-
-        # --- 临时特征审计代码 ---
-        with open("test_output_debug.log", "a", encoding="utf-8") as df:
-            df.write(f"DEBUG [Feature Extraction] Video ID: {video_obj.name}\n")
-            df.write(f"DEBUG [Visual DNA] Brightness: {p_data.get('visual_brightness')}, Saturation: {p_data.get('visual_saturation')}\n")
-            df.write(f"DEBUG [Audio DNA] BPM: {p_data.get('audio_bpm')}, CutFreq: {p_data.get('cut_frequency')}\n")
-        # -----------------------
-
-        # *=== 核心逻辑增强：引入赛道基准对比 + 贝叶斯平滑 ===*
-        # *1. 获取目标赛道数据*
-        theme_name = request.POST.get('theme_name')
-        theme_baseline = None
-        warning_msg = None
-        
-        if theme_name:
-            # *只查询点赞数，优化性能*
-            theme_videos = list(Video.objects.filter(theme_label=theme_name).values('digg_count'))
-            
-            # *[NEW] 获取全局数据用于贝叶斯平滑*
-            # *为了性能，这里最好有缓存，暂且实时查询 (仅 digg_count)*
-            global_videos = list(Video.objects.all().values('digg_count'))
-            # *计算全局基准*
-            global_baseline = calculate_theme_stats(global_videos)
-            
-            # *2. 计算赛道基准 (传入全局基准以启用平滑)*
-            theme_baseline = calculate_theme_stats(theme_videos, global_stats=global_baseline)
-            
-            if theme_baseline.get('warning'):
-                warning_msg = theme_baseline['warning']
-        
-        # *3. 实例化预测服务并执行预测*
-        # *[Singleton] 获取进程级单例实例：若已初始化则直接返回内存中的对象，无欲盘 I/O 开销*
-        service = predict_service.DiggPredictionService()
-        # *传入 theme_baseline 以计算 quality_score 和 percentile_rank*
-        result = service.predict_digg_count(p_data, theme_baseline=theme_baseline)
-        
-        # *解析预测结果*
-        pred_likes = result.get('predicted_digg', 0)
-        quality_score = result.get('quality_score', 0)
-        percentile_rank = result.get('percentile_rank', '')
-        
-        # *调用大模型生成专家建议*
-        # *将质量分和排名信息注入给 LLM*
-        # *[新增] 注入统计学引擎算出的推荐时间与分位数*
-        theme_p25 = theme_baseline.get('p25', 0) if theme_baseline else 0
-        theme_p50 = theme_baseline.get('p50', 0) if theme_baseline else 0
-        theme_p75 = theme_baseline.get('p75', 0) if theme_baseline else 0
-        optimal_times = theme_baseline.get('optimal_publishing_times', ["18:00", "19:00", "20:00"]) if theme_baseline else ["18:00", "19:00", "20:00"]
-        
-        advice_context = {
-            **p_data, 
-            'predicted_likes': pred_likes,
-            'quality_score': quality_score,
-            'percentile_rank': percentile_rank,
-            'theme_name': theme_name or "通用赛道",
-            'theme_p25': theme_p25,
-            'theme_p50': theme_p50,
-            'theme_p75': theme_p75,
-            'optimal_publishing_times': optimal_times
-        }
-        
-        # *[新增] 注入用户自定义API配置*
-        config = CreatorConfig.objects.filter(user=request.user).first()
-        user_key = config.llm_api_key if config else None
-        model_name = config.llm_model_name if config else None
-        
         try:
-            import concurrent.futures
-            # *引入更长的超时机制，允许 DeepSeek API 进行深度思考*
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(LLMService().generate_advice, advice_context, user_key=user_key, model_name=model_name)
-                # *配置 20 秒超时以允许长文本生成能顺利执行*
-                advice = future.result(timeout=50.0)
+            analyzer = VideoContentAnalyzer(temp_path)
+            hw = analyzer.run_full_analysis()
+    
+            # *构建特征数据字典*
+            p_data = {
+                'visual_brightness': hw.get('visual_brightness', 128),
+                'visual_saturation': hw.get('visual_saturation', 100),
+                'audio_bpm': hw.get('audio_bpm', 110),
+                'cut_frequency': hw.get('cut_frequency', 0.5),
+                'duration_sec': hw.get('duration_sec', 15),
+                'follower_count': follower_count,
+                'publish_hour': publish_hour,
+                'avg_sentiment': 0.5,
+                'collect_count': 0,
+                'comment_count': 0,
+                'share_count': 0,
+                'script_keywords': hw.get('script_keywords', []),
+                # *[NEW] 注入当前选择的主题供模型特征工程使用*
+                'theme_label': request.POST.get('theme_name', 'Unknown')
+            }
+            print(f"📦 [Audit B: p_data_Built] -> {p_data}")
+    
+            # --- 临时特征审计代码 ---
+            with open("test_output_debug.log", "a", encoding="utf-8") as df:
+                df.write(f"DEBUG [Feature Extraction] Video ID: {video_obj.name}\n")
+                df.write(f"DEBUG [Visual DNA] Brightness: {p_data.get('visual_brightness')}, Saturation: {p_data.get('visual_saturation')}\n")
+                df.write(f"DEBUG [Audio DNA] BPM: {p_data.get('audio_bpm')}, CutFreq: {p_data.get('cut_frequency')}\n")
+            # -----------------------
+    
+            # *=== 核心逻辑增强：引入赛道基准对比 + 贝叶斯平滑 ===*
+            # *1. 获取目标赛道数据*
+            theme_name = request.POST.get('theme_name')
+            theme_baseline = None
+            warning_msg = None
+            
+            if theme_name:
+                # *只查询点赞数，优化性能*
+                theme_videos = list(Video.objects.filter(theme_label=theme_name).values('digg_count'))
+                
+                # *[NEW] 获取全局数据用于贝叶斯平滑*
+                # *为了性能，这里最好有缓存，暂且实时查询 (仅 digg_count)*
+                global_videos = list(Video.objects.all().values('digg_count'))
+                # *计算全局基准*
+                global_baseline = calculate_theme_stats(global_videos)
+                
+                # *2. 计算赛道基准 (传入全局基准以启用平滑)*
+                theme_baseline = calculate_theme_stats(theme_videos, global_stats=global_baseline)
+                
+                if theme_baseline.get('warning'):
+                    warning_msg = theme_baseline['warning']
+            
+            # *3. 实例化预测服务并执行预测*
+            # *[Singleton] 获取进程级单例实例：若已初始化则直接返回内存中的对象，无欲盘 I/O 开销*
+            service = predict_service.DiggPredictionService()
+            # *传入 theme_baseline 以计算 quality_score 和 percentile_rank*
+            result = service.predict_digg_count(p_data, theme_baseline=theme_baseline)
+            
+            # *解析预测结果*
+            pred_likes = result.get('predicted_digg', 0)
+            quality_score = result.get('quality_score', 0)
+            percentile_rank = result.get('percentile_rank', '')
+            
+            # *调用大模型生成专家建议*
+            # *将质量分和排名信息注入给 LLM*
+            # *[新增] 注入统计学引擎算出的推荐时间与分位数*
+            theme_p25 = theme_baseline.get('p25', 0) if theme_baseline else 0
+            theme_p50 = theme_baseline.get('p50', 0) if theme_baseline else 0
+            theme_p75 = theme_baseline.get('p75', 0) if theme_baseline else 0
+            optimal_times = theme_baseline.get('optimal_publishing_times', ["18:00", "19:00", "20:00"]) if theme_baseline else ["18:00", "19:00", "20:00"]
+            
+            advice_context = {
+                **p_data, 
+                'predicted_likes': pred_likes,
+                'quality_score': quality_score,
+                'percentile_rank': percentile_rank,
+                'theme_name': theme_name or "通用赛道",
+                'theme_p25': theme_p25,
+                'theme_p50': theme_p50,
+                'theme_p75': theme_p75,
+                'optimal_publishing_times': optimal_times
+            }
+            
+            # *[新增] 注入用户自定义API配置*
+            config = CreatorConfig.objects.filter(user=request.user).first()
+            user_key = config.llm_api_key if config else None
+            model_name = config.llm_model_name if config else None
+            
+            try:
+                import concurrent.futures
+                # *引入更长的超时机制，允许 DeepSeek API 进行深度思考*
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(LLMService().generate_advice, advice_context, user_key=user_key, model_name=model_name)
+                    # *配置 20 秒超时以允许长文本生成能顺利执行*
+                    advice = future.result(timeout=50.0)
+            except Exception as e:
+                # *捕获超时或异常，返回真实的 LLM 报错信息*
+                print(f"[Circuit Breaker] LLM Call Failed or Timeout: {e}")
+                advice = f"AI 分析生成异常: {str(e)}"
         except Exception as e:
-            # *捕获超时或异常，返回真实的 LLM 报错信息*
-            print(f"[Circuit Breaker] LLM Call Failed or Timeout: {e}")
-            advice = f"AI 分析生成异常: {str(e)}"
+            logger.error(f"处理视频过程中发生异常: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return JsonResponse({"status": "fallback", "predicted_likes": 0, "quality_score": 0, "message": "Corrupted file handled"}, status=200)
 
 
         # *后端调试打印*
