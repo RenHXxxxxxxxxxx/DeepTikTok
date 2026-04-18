@@ -8,7 +8,7 @@ from locust import TaskSet, task
 
 logger = logging.getLogger(__name__)
 
-# *全局配置项字典，避免硬编码*
+# 全局配置项字典，避免硬编码
 GLOBAL_CONFIG = {
     "topics": ["JYP", "Tech", "Gaming", "LifeStyle", "None"],
     "normal_video_timeout": 30.0,
@@ -37,14 +37,14 @@ class AIPredictionTasks(TaskSet):
         *为了避免高并发下本地磁盘 I/O 成为瓶颈（掩盖了真实的 GPU/CPU 瓶颈），*
         *我们在内存中动态生成伪造的 MP4 字节流。*
         """
-        # *生成一个包含合法 MP4 文件头 (ftyp) 的伪造视频流 (约 500KB)*
+        # 生成一个包含合法 MP4 文件头 (ftyp) 的伪造视频流 (约 500KB)
         mp4_header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00isommp42"
         self.valid_video_bytes = mp4_header + os.urandom(500 * 1024)
         
-        # *生成一个完全损坏的字节流，用于测试 CV2 的 MAX_CONSECUTIVE_FAILURES 机制*
+        # 生成一个完全损坏的字节流，用于测试 CV2 的 MAX_CONSECUTIVE_FAILURES 机制
         self.corrupt_video_bytes = os.urandom(100 * 1024)
         
-        # *预设测试主题池从配置获取*
+        # 预设测试主题池从配置获取
         self.topics = GLOBAL_CONFIG["topics"]
 
     @task(GLOBAL_CONFIG["normal_task_weight"])
@@ -53,11 +53,11 @@ class AIPredictionTasks(TaskSet):
         *核心高压测试：正常视频特征提取与预测 (权重 4)*
         *模拟用户上传视频并等待多模态处理（耗时较长）。*
         """
-        # *每次请求重置字节流指针*
+        # 每次请求重置字节流指针
         video_file = io.BytesIO(self.valid_video_bytes)
         topic = random.choice(self.topics)
         
-        # *根据文档要求从 Cookie 提取 CSRF Token 并构造包含 Referer 的 Header*
+        # 根据文档要求从 Cookie 提取 CSRF Token 并构造包含 Referer 的 Header
         csrftoken = self.client.cookies.get(GLOBAL_CONFIG["csrf_cookie"], "")
         headers = {
             GLOBAL_CONFIG["csrf_header"]: csrftoken, 
@@ -73,10 +73,10 @@ class AIPredictionTasks(TaskSet):
             'publish_hour': random.randint(0, 23)
         }
 
-        # *预测接口通常耗时较长，设置超时防止 Locust 线程假死*
+        # 预测接口通常耗时较长，设置超时防止 Locust 线程假死
         start_time = time.time()
         
-        # *进行网络请求操作，使用 try-except 捕获可能的网络异常保证稳定性*
+        # 进行网络请求操作，使用 try-except 捕获可能的网络异常保证稳定性
         try:
             with self.client.post(GLOBAL_CONFIG["endpoint"], 
                                   files=files, 
@@ -88,11 +88,11 @@ class AIPredictionTasks(TaskSet):
                 
                 process_time = time.time() - start_time
 
-                # *1. 正常处理完毕*
+                # 1. 正常处理完毕
                 if response.status_code == 200:
                     try:
                         res_json = response.json()
-                        # *严格断言返回结构是否包含预测结果*
+                        # 严格断言返回结构是否包含预测结果
                         if "predicted_likes" in res_json and "quality_score" in res_json:
                             response.success()
                             if process_time > 10.0:
@@ -102,15 +102,15 @@ class AIPredictionTasks(TaskSet):
                     except ValueError:
                         response.failure("服务器返回了非 JSON 格式的错误页")
 
-                # *2. 触发了 LLM 的限流 (HTTP 429) 或 GPU 满载 (HTTP 503)*
+                # 2. 触发了 LLM 的限流 (HTTP 429) 或 GPU 满载 (HTTP 503)
                 elif response.status_code in [429, 503]:
                     logger.warning(f"🚫 触发系统限流或排队 (Status {response.status_code})。执行指数退避休眠...")
-                    # *在压测逻辑中，正确触发限流也是一种“预期内的成功拦截”*
+                    # 在压测逻辑中，正确触发限流也是一种“预期内的成功拦截”
                     response.success() 
-                    # *模拟 Exponential Backoff*
+                    # 模拟 Exponential Backoff
                     time.sleep(random.uniform(2.0, 5.0)) 
 
-                # *3. 内部服务器错误 (如 OOM 导致进程崩溃)*
+                # 3. 内部服务器错误 (如 OOM 导致进程崩溃)
                 elif response.status_code >= 500:
                     logger.error(f"💥 预测接口崩溃 (HTTP {response.status_code})！极大概率发生 GPU OOM 或多线程死锁。")
                     response.failure(f"Server Error {response.status_code}")
@@ -119,7 +119,7 @@ class AIPredictionTasks(TaskSet):
                     response.failure(f"Unexpected HTTP {response.status_code}")
                     
         except Exception as e:
-            # *捕获单次请求失效，防止整个测试意外崩溃*
+            # 捕获单次请求失效，防止整个测试意外崩溃
             logger.error(f"网络请求引发异常: {str(e)}")
 
     @task(GLOBAL_CONFIG["corrupt_task_weight"])
@@ -130,7 +130,7 @@ class AIPredictionTasks(TaskSet):
         """
         video_file = io.BytesIO(self.corrupt_video_bytes)
         
-        # *根据文档要求从 Cookie 提取 CSRF Token 并构造包含 Referer 的 Header*
+        # 根据文档要求从 Cookie 提取 CSRF Token 并构造包含 Referer 的 Header
         csrftoken = self.client.cookies.get(GLOBAL_CONFIG["csrf_cookie"], "")
         headers = {
             GLOBAL_CONFIG["csrf_header"]: csrftoken, 
@@ -142,7 +142,7 @@ class AIPredictionTasks(TaskSet):
         }
         data = {'theme_name': GLOBAL_CONFIG["corrupt_video_theme"]}
 
-        # *进行网络请求操作，使用 try-except 捕获可能的网络异常保证稳定性*
+        # 进行网络请求操作，使用 try-except 捕获可能的网络异常保证稳定性
         try:
             with self.client.post(GLOBAL_CONFIG["endpoint"], 
                                   files=files, 
@@ -153,13 +153,13 @@ class AIPredictionTasks(TaskSet):
                                   timeout=GLOBAL_CONFIG["corrupt_video_timeout"]) as response:
                 
                 if response.status_code == 400:
-                    # *预期结果 A：系统成功识别了坏文件并拒绝*
+                    # 预期结果 A：系统成功识别了坏文件并拒绝
                     response.success()
                 elif response.status_code == 200:
                     try:
                         res_json = response.json()
                         if res_json.get("status") == "fallback":
-                            # *预期结果 B：触发了静默退回和异常补偿机制*
+                            # 预期结果 B：触发了静默退回和异常补偿机制
                             response.success()
                         else:
                             response.failure("坏文件未触发 fallback 状态标志")
@@ -170,5 +170,5 @@ class AIPredictionTasks(TaskSet):
                     response.failure("Bad file caused HTTP 500")
                     
         except Exception as e:
-            # *捕获单次请求失效，防止整个测试意外崩溃*
+            # 捕获单次请求失效，防止整个测试意外崩溃
             logger.error(f"网络请求引发异常: {str(e)}")

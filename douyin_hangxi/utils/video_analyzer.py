@@ -14,28 +14,28 @@ import uuid
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-# *忽略 librosa 的低电平警告*
+# 忽略 librosa 的低电平警告
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# *核心配置：FFmpeg 路径强行指定*
+# 核心配置：FFmpeg 路径强行指定
 # ==========================================
 FFMPEG_MANUAL_PATH = r"C:\ffmpeg\ffmpeg-8.0.1-essentials_build\bin"
 
 # ==========================================
-# *[NEW] 超时保护配置 (Timeout Protection)*
+# [NEW] 超时保护配置 (Timeout Protection)
 # ==========================================
 TIMEOUT_CONFIG = {
-    'whisper_asr': 60,        # *Whisper 语音识别超时 (秒)*
-    'bpm_detection': 15,      # *BPM 节拍检测超时 (秒)*
-    'visual_analysis': 45,    # *视觉特征分析超时 (秒)*
+    'whisper_asr': 60,        # Whisper 语音识别超时 (秒)
+    'bpm_detection': 15,      # BPM 节拍检测超时 (秒)
+    'visual_analysis': 45,    # 视觉特征分析超时 (秒)
 }
 
 import threading
 
-# *全局模型缓存，避免重复加载*
+# 全局模型缓存，避免重复加载
 _CACHED_WHISPER = None
-# *全局推理锁，保障多线程安全，避免 OOM 和 GPU 状态损坏*
+# 全局推理锁，保障多线程安全，避免 OOM 和 GPU 状态损坏
 _WHISPER_LOCK = threading.Lock()
 
 
@@ -64,10 +64,10 @@ class VideoContentAnalyzer:
     def _inject_ffmpeg_path(self):
         """Web 端环境注入逻辑：确保 Django 进程能找到 ffmpeg.exe"""
         if os.path.exists(FFMPEG_MANUAL_PATH):
-            # *将路径加入系统 PATH 的最前面*
+            # 将路径加入系统 PATH 的最前面
             if FFMPEG_MANUAL_PATH not in os.environ["PATH"]:
                 os.environ["PATH"] = FFMPEG_MANUAL_PATH + os.pathsep + os.environ["PATH"]
-                # *仅在第一次注入时打印，避免日志刷屏*
+                # 仅在第一次注入时打印，避免日志刷屏
                 print(f"[System] FFmpeg 环境已注入 Web 进程: {FFMPEG_MANUAL_PATH}")
 
     def _run_with_timeout(self, func, timeout_sec, default_value, stage_name="Unknown"):
@@ -98,7 +98,7 @@ class VideoContentAnalyzer:
     def run_full_analysis(self):
         """执行全量分析并返回物理特征字典"""
         
-        # *Heartbeat Log: 明确显示当前正在使用哪个硬件进行计算*
+        # Heartbeat Log: 明确显示当前正在使用哪个硬件进行计算
         print(f"[AIWorker] ⚡ GPU Computing: {self.video_id} on {self.device}")
         
         cap = cv2.VideoCapture(self.video_path)
@@ -114,14 +114,14 @@ class VideoContentAnalyzer:
         cut_points = 0
         prev_hist = None
 
-        # *优化采样步长：Web 端追求响应速度，每秒仅采 1 帧 (极速模式)*
+        # 优化采样步长：Web 端追求响应速度，每秒仅采 1 帧 (极速模式)
         sample_step = max(int(fps), 1)
         
-        # *=== [NEW] 智能损坏检测配置 ===*
-        consecutive_failures = 0           # *连续读取失败计数*
-        MAX_CONSECUTIVE_FAILURES = 50      # *连续失败阈值，超过此值视为损坏视频*
-        successful_frames = 0              # *成功读取的帧数*
-        MIN_SUCCESSFUL_FRAMES = 5          # *最少需要成功读取的帧数*
+        # === [NEW] 智能损坏检测配置 ===
+        consecutive_failures = 0           # 连续读取失败计数
+        MAX_CONSECUTIVE_FAILURES = 50      # 连续失败阈值，超过此值视为损坏视频
+        successful_frames = 0              # 成功读取的帧数
+        MIN_SUCCESSFUL_FRAMES = 5          # 最少需要成功读取的帧数
 
         try:
             for i in range(0, total_frames, sample_step):
@@ -129,18 +129,18 @@ class VideoContentAnalyzer:
                 ret, frame = cap.read()
                 
                 if not ret:
-                    # *读取失败，累加计数*
+                    # 读取失败，累加计数
                     consecutive_failures += 1
                     
-                    # *=== 智能损坏检测：连续失败超过阈值 ===*
+                    # === 智能损坏检测：连续失败超过阈值 ===
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         print(f"🔴 *[Corruption Detected] {consecutive_failures} consecutive read failures on: {self.video_id}*")
                         print(f"   *Aborting analysis to prevent FFmpeg infinite loop.*")
-                        # *提前跳出循环，使用已收集的数据*
+                        # 提前跳出循环，使用已收集的数据
                         break
-                    continue  # *跳过这一帧，尝试下一帧*
+                    continue  # 跳过这一帧，尝试下一帧
                 
-                # *读取成功，重置失败计数*
+                # 读取成功，重置失败计数
                 consecutive_failures = 0
                 successful_frames += 1
 
@@ -188,43 +188,43 @@ class VideoContentAnalyzer:
         finally:
             cap.release()
             
-            # *【关键】Web 服务必须手动清理显存垃圾*
+            # 【关键】Web 服务必须手动清理显存垃圾
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        # *=== [NEW] 损坏视频最终验证 ===*
-        # *如果成功读取的帧数过少，视为严重损坏*
+        # === [NEW] 损坏视频最终验证 ===
+        # 如果成功读取的帧数过少，视为严重损坏
         if successful_frames < MIN_SUCCESSFUL_FRAMES:
             print(f"⚠️ *[Corruption Warning] Only {successful_frames}/{MIN_SUCCESSFUL_FRAMES} frames read successfully: {self.video_id}*")
-            # *仍然尝试返回部分数据，不抛出异常*
+            # 仍然尝试返回部分数据，不抛出异常
 
-        # *计算核心指标*
+        # 计算核心指标
         visual_brightness_val = round(float(np.mean(brightness_list)), 2) if brightness_list else 0
         visual_saturation_val = round(float(np.mean(saturation_list)), 2) if saturation_list else 0
         cut_frequency_val = round(float(cut_points / duration), 2) if duration > 5 else 0
 
-        # *================================================================*
-        # *[TIMEOUT PROTECTED] 音频分析 - 15秒超时*
-        # *================================================================*
+        # ================================================================
+        # [TIMEOUT PROTECTED] 音频分析 - 15秒超时
+        # ================================================================
         audio_bpm = self._run_with_timeout(
             func=self._analyze_audio_safe,
             timeout_sec=TIMEOUT_CONFIG['bpm_detection'],
-            default_value=120,  # *超时返回默认 BPM*
+            default_value=120,  # 超时返回默认 BPM
             stage_name="BPM Detection"
         )
 
-        # *================================================================*
-        # *[TIMEOUT PROTECTED] ASR 语音识别 - 60秒超时 (最耗时)*
-        # *================================================================*
+        # ================================================================
+        # [TIMEOUT PROTECTED] ASR 语音识别 - 60秒超时 (最耗时)
+        # ================================================================
         keywords = self._run_with_timeout(
             func=self._extract_audio_keywords,
             timeout_sec=TIMEOUT_CONFIG['whisper_asr'],
-            default_value=[],  # *超时返回空列表，触发氛围标签 fallback*
+            default_value=[],  # 超时返回空列表，触发氛围标签 fallback
             stage_name="Whisper ASR"
         )
 
         # [Fallback Mechanism] 氛围标签补全
-        # *如果 ASR 结果为空（纯音乐/风景），根据视听指标生成氛围标签*
+        # 如果 ASR 结果为空（纯音乐/风景），根据视听指标生成氛围标签
         if not keywords:
             fallback_tags = []
             

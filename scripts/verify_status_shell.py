@@ -7,7 +7,7 @@ import sys
 import os
 from django.conf import settings
 
-# *MATCH VIEWS.PY IMPORT STRATEGY*
+# MATCH VIEWS.PY IMPORT STRATEGY
 if os.path.join(settings.BASE_DIR, 'data') not in sys.path:
     sys.path.insert(0, os.path.join(settings.BASE_DIR, 'data'))
 from spyder_unified import DouyinUnifiedPipeline

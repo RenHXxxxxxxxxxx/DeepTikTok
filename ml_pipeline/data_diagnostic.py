@@ -1,21 +1,21 @@
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
 import os
 import sys
 import django
 from django.db.models import Count, Q
 
-# *========== 全局配置 ==========*
+# ========== 全局配置 ==========
 GLOBAL_CONFIG = {
-    # *项目根目录*
+    # 项目根目录
     "PROJECT_ROOT": r"d:\renhangxi_tiktok_bysj",
-    # *不平衡分析阈值*
+    # 不平衡分析阈值
     "MIN_SAMPLES_THRESHOLD": 200,
-    # *目标变量分析阈值*
+    # 目标变量分析阈值
     "VIRAL_THRESHOLD": 100000,
     "COLD_THRESHOLD": 100
 }
 
-# *加载 Django 环境*
+# 加载 Django 环境
 PROJECT_ROOT = GLOBAL_CONFIG["PROJECT_ROOT"]
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -50,7 +50,7 @@ def run_diagnostic():
             print("*[WARN] 数据库无数据，请先执行抓取!*")
             return
         
-        # *1. 主题类别分布诊断*
+        # 1. 主题类别分布诊断
         print("\n*[1] 主题类别不平衡诊断 (Categorical Imbalance)*")
         print("-" * 50)
         
@@ -67,7 +67,7 @@ def run_diagnostic():
             if count < min_threshold:
                 needs_action.append((theme, count))
                 
-        # *2. 目标变量分布诊断 (Y-Distribution)*
+        # 2. 目标变量分布诊断 (Y-Distribution)
         print("\n*[2] 目标变量分布诊断 (Target Variable Bias)*")
         print("-" * 50)
         viral_t = GLOBAL_CONFIG['VIRAL_THRESHOLD']
@@ -79,21 +79,21 @@ def run_diagnostic():
         print(f"  - 爆款视频 (>10w赞): {viral_count} 个 (占 {viral_count/total_videos*100:.1f}%)")
         print(f"  - 冷门视频 (<100赞): {cold_count} 个 (占 {cold_count/total_videos*100:.1f}%)")
         
-        # *行动建议输出*
+        # 行动建议输出
         print("\n*[ACTION REQUIRED] 执行策略:*")
         print("-" * 50)
         
         if needs_action:
             for theme, c in needs_action:
                 shortage = min_threshold - c
-                print(f"  *⚠️ Warning: 极端长尾偏差。Action required: 请为主题 '{theme}' 补充抓取至少 {shortage} 个样本。*")
+                print(f"  * Warning: 极端长尾偏差。Action required: 请为主题 '{theme}' 补充抓取至少 {shortage} 个样本。*")
         else:
             print("  *[OK] 所有主题样本量均达标。*")
             
         if viral_count == 0:
-            print(f"  *⚠️ Warning: 缺少爆款特征表达。Action required: 请针对性抓取 >{viral_t // 1000}k 赞的头部视频。*")
+            print(f"  * Warning: 缺少爆款特征表达。Action required: 请针对性抓取 >{viral_t // 1000}k 赞的头部视频。*")
         if cold_count == 0:
-            print(f"  *⚠️ Warning: 缺少冷门负样本特征。Action required: 请针对性抓取 <{cold_t} 赞的长尾视频。*")
+            print(f"  * Warning: 缺少冷门负样本特征。Action required: 请针对性抓取 <{cold_t} 赞的长尾视频。*")
         
         print("="*60 + "\n")
         
@@ -102,3 +102,4 @@ def run_diagnostic():
 
 if __name__ == "__main__":
     run_diagnostic()
+

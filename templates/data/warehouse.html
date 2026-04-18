@@ -7,7 +7,7 @@
         <div class="col-12">
             <div class="card border-0 shadow-sm">
                 <div class="card-body p-4">
-                    <h5 class="fw-bold mb-3"><i class="fas fa-industry text-primary me-2"></i>资产精炼工厂</h5>
+                    <h5 class="fw-bold mb-3"><i class="fas fa-industry text-primary me-2"></i>数据精炼</h5>
                     <p class="text-muted small">
                         <strong>操作指引：</strong> 您可以一键导入原始视频数据，也可以为已存在的视频主题（如“哪吒2”）单独关联评论 CSV。系统会自动通过
                         <code>video_id</code> 进行精准挂载。
@@ -93,7 +93,7 @@
     </div>
 </div>
 
-<!-- *新增：仅评论补抓卡片* -->
+<!-- 新增：仅评论补抓卡片 -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card border-0 shadow-sm">
@@ -171,7 +171,7 @@
 </div>
 </div>
 
-<!-- *仅评论采集模态框* -->
+<!-- 仅评论采集模态框 -->
 <div class="modal fade" id="commentSpiderModal" tabindex="-1" aria-labelledby="commentSpiderModalLabel"
     aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -219,7 +219,7 @@
                     </div>
                 </form>
 
-                <!-- *进度展示面板 (复用样式)* -->
+                <!-- 进度展示面板 (复用样式) -->
                 <div id="comment-progress-panel" class="d-none py-3">
                     <h5 class="text-center text-info mb-3">
                         <i class="fas fa-circle-notch fa-spin me-2"></i>正在执行评论补抓...
@@ -288,13 +288,13 @@
                     // *复用已有的轮询逻辑，但指向新的进度条元素*
                     startSpiderPolling('comment-progress-bar', 'comment-status-text', 'comment-eta-text');
                 } else {
-                    alert('❌ 启动失败: ' + data.message);
+                    alert(' 启动失败: ' + data.message);
                     btn.disabled = false;
                     btn.innerHTML = '<i class="fas fa-rocket me-1"></i>开始补抓';
                 }
             })
             .catch(err => {
-                alert('❌ 网络请求失败');
+                alert(' 网络请求失败');
                 console.error(err);
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-rocket me-1"></i>开始补抓';
@@ -409,9 +409,9 @@
             fetch("{% url 'get_spider_status_api' %}")
                 .then(r => r.json())
                 .then(data => {
-                    console.log("🖥️ [DEBUG-3] Frontend Received:", data);
+                    console.log(" [DEBUG-3] Frontend Received:", data);
                     let progressBar = document.getElementById(barId);
-                    console.log("🖥️ [DEBUG-4] Progress Bar Element Found:", progressBar !== null);
+                    console.log(" [DEBUG-4] Progress Bar Element Found:", progressBar !== null);
                     const pct = data.percent;
 
                     // *更新进度条*
@@ -438,7 +438,7 @@
                     if (pct >= 100 || (data.status && data.status.includes("完成") && pct > 90)) {
                         clearInterval(intervalId);
 
-                        if (statusText) statusText.innerText = "✅ 任务全部完成，正在刷新页面...";
+                        if (statusText) statusText.innerText = " 任务全部完成，正在刷新页面...";
 
                         // *延迟刷新*
                         setTimeout(() => window.location.reload(), 1500);
@@ -446,9 +446,10 @@
                 })
                 .catch(e => {
                     console.error("Polling error:", e);
-                    if (statusText) statusText.innerText = "⚠️ 连接断开，但在后台继续运行...";
+                    if (statusText) statusText.innerText = " 连接断开，但在后台继续运行...";
                 });
         }, 1000); // *1秒轮询一次*
     }
 </script>
 {% endblock %}
+

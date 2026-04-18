@@ -56,7 +56,7 @@
                                 <label class="form-label small fw-bold text-muted">目标赛道 (Target Theme)</label>
                                 <select class="form-select" name="theme_name" id="themeSelect">
                                     {% for theme in themes_list %}
-                                    <option value="{{ theme }}" {% if theme == active_theme %}selected{% endif %}>
+                                    <option value="{{ theme }}" {% if theme ==  active_theme %}selected{% endif %}>
                                         {{ theme }}
                                     </option>
                                     {% endfor %}
@@ -475,7 +475,7 @@
                     if (displayPercent < 55) statusText.innerText = '正在并行提取视觉物理特征...';
                     else if (displayPercent < 75) statusText.innerText = 'Librosa 正在解析音频 BPM 与采样频率...';
                     else if (displayPercent < 90) statusText.innerText = 'AI 模型正在执行多模态融合特征预测...';
-                    else statusText.innerText = '百度千帆大模型正在生成针对性运营诊断...';
+                    else statusText.innerText = 'DeepSeek正在生成针对性运营诊断...';
                 }
             }, 600);
         };

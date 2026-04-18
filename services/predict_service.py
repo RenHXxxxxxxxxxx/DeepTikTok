@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
 """
 predict_service.py
 预测服务模块 - 基于统一竞技场的高可用架构 (Refactored Version)
@@ -16,10 +16,10 @@ import numpy as np
 import pandas as pd
 from django.conf import settings
 
-# *配置日志*
+# 配置日志
 logger = logging.getLogger(__name__)
 
-# *全局配置*
+# 全局配置
 GLOBAL_CONFIG = {
     'CHINESE_MAPPING': {
         '亮度': 'visual_brightness',
@@ -45,7 +45,7 @@ class DiggPredictionService:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    logger.info("🚀 [Singleton] 初始化 DiggPredictionService 实例")
+                    logger.info(" [Singleton] 初始化 DiggPredictionService 实例")
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
@@ -78,7 +78,7 @@ class DiggPredictionService:
         self._load_assets()
         
         self._initialized = True
-        logger.info("✅ [Singleton] DiggPredictionService 资产装载完毕")
+        logger.info(" [Singleton] DiggPredictionService 资产装载完毕")
 
     # ==========================================
     # 核心热重载与资产加载逻辑
@@ -92,16 +92,16 @@ class DiggPredictionService:
                     with self._lock:
                         # 双重检查防止并发穿透
                         if self.manifest_path.stat().st_mtime > self._manifest_mtime:
-                            logger.info("🔄 [Hot Reload] 监测到新模型版本发布，执行热更新...")
+                            logger.info(" [Hot Reload] 监测到新模型版本发布，执行热更新...")
                             self._load_assets()
         except Exception as e:
-            logger.error(f"⚠️ 热重载检查异常: {e}")
+            logger.error(f" 热重载检查异常: {e}")
 
     def _load_assets(self):
         """物理加载模型、伸缩器与拓扑清单"""
         try:
             if not self.manifest_path.exists():
-                logger.error(f"❌ 找不到版本清单: {self.manifest_path}")
+                logger.error(f" 找不到版本清单: {self.manifest_path}")
                 self._reset_state()
                 return
 
@@ -111,7 +111,7 @@ class DiggPredictionService:
             # 适配 train_master_arena 的新键名 'current_version'
             version_id = self.manifest.get('current_version')
             if not version_id:
-                logger.error("❌ 清单中缺失 current_version")
+                logger.error(" 清单中缺失 current_version")
                 self._reset_state()
                 return
 
@@ -129,13 +129,13 @@ class DiggPredictionService:
                     self.ordered_feature_names = self.base_features
                     
                 self._manifest_mtime = self.manifest_path.stat().st_mtime
-                logger.info(f"✅ 成功挂载冠军模型: {version_id} ({self.manifest.get('best_model')})")
+                logger.info(f" 成功挂载冠军模型: {version_id} ({self.manifest.get('best_model')})")
             else:
-                logger.error(f"❌ 物理文件缺失: 期望 {model_path.name}")
+                logger.error(f" 物理文件缺失: 期望 {model_path.name}")
                 self._reset_state()
 
         except Exception as e:
-            logger.error(f"💥 资产加载严重崩溃: {e}\n{traceback.format_exc()}")
+            logger.error(f" 资产加载严重崩溃: {e}\n{traceback.format_exc()}")
             self._reset_state()
 
     def _reset_state(self):
@@ -155,12 +155,12 @@ class DiggPredictionService:
 
     def _build_features(self, video_data: dict, theme_baseline: dict = None) -> pd.DataFrame:
         """特征合成器：从原始 JSON 提取并构建符合拓扑维度的 DataFrame"""
-        # *1. 键名中文化映射*
+        # 1. 键名中文化映射
         for cn_key, en_key in GLOBAL_CONFIG['CHINESE_MAPPING'].items():
             if cn_key in video_data:
                 video_data[en_key] = video_data.pop(cn_key)
 
-        # *2. 基础物理特征提取与对数平滑*
+        # 2. 基础物理特征提取与对数平滑
         fol_raw = self._safe_float(video_data.get('follower_count', 10000))
         fol_log = np.log1p(fol_raw)
 
@@ -172,7 +172,7 @@ class DiggPredictionService:
         cf = self._safe_float(video_data.get('cut_frequency', 0.5))
         bpm = self._safe_float(video_data.get('audio_bpm', 110))
 
-        # *2.1 实时贝叶斯目标编码 (Bayesian Target Encoding)*
+        # 2.1 实时贝叶斯目标编码 (Bayesian Target Encoding)
         theme_count = float(theme_baseline.get('count', 10)) if theme_baseline else 10.0
         theme_mean = float(theme_baseline.get('mean', 5000)) if theme_baseline else 5000.0
         local_mean_log = np.log1p(theme_mean)
@@ -180,10 +180,10 @@ class DiggPredictionService:
         weight = 10.0
         theme_enc = (theme_count * local_mean_log + weight * global_mean_log) / (theme_count + weight)
 
-        # *3. 构造占位 DataFrame*
+        # 3. 构造占位 DataFrame
         X_final = pd.DataFrame(0.0, index=[0], columns=self.ordered_feature_names)
 
-        # *4. 衍生特征计算与注入*
+        # 4. 衍生特征计算与注入
         features_to_inject = {
             'follower_count_log': fol_log, 'publish_hour': hrr, 'duration_sec': dur,
             'avg_sentiment': sent, 'visual_brightness': vb, 'visual_saturation': vs,
@@ -243,10 +243,10 @@ class DiggPredictionService:
             is_fallback = False
             try:
                 #下面是bug开关
-                #raise ValueError("🔥【混沌测试】模拟新模型遭遇未知特征崩溃！")
+                #raise ValueError("【混沌测试】模拟新模型遭遇未知特征崩溃！")
                 raw_pred_log = self.model.predict(X_scaled_df)[0]
             except Exception as e:
-                logger.warning(f"⚠️ 主模型推理崩溃，触发降级回滚: {e}")
+                logger.warning(f" 主模型推理崩溃，触发降级回滚: {e}")
                 raw_pred_log, is_fallback = self._execute_fallback(X_scaled_df)
 
             # 4. 指数还原与分数映射
@@ -267,7 +267,7 @@ class DiggPredictionService:
             }
 
         except Exception as e:
-            logger.error(f"💥 预测防线彻底击穿，返回安全默认值: {e}\n{traceback.format_exc()}")
+            logger.error(f" 预测防线彻底击穿，返回安全默认值: {e}\n{traceback.format_exc()}")
             return {"predicted_digg": 0, "quality_score": 0.0, "percentile_rank": "安全兜底模式", "baseline_ref": None}
 
     def _execute_fallback(self, X_scaled_df: pd.DataFrame):
@@ -376,3 +376,4 @@ if __name__ == "__main__":
     
     print("\n--- 无基准测试 ---")
     print(service.predict_digg_count(test_video, None))
+

@@ -1,1 +1,1 @@
-# *空文件用于将management/commands目录标记为Python包*
+# 空文件用于将management/commands目录标记为Python包

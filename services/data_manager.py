@@ -10,11 +10,11 @@ from django.db.models import Q
 from datetime import datetime
 import pandas as pd
 
-# *================================================================*
-# *全局配置 (Global Config)*
-# *================================================================*
+# ================================================================
+# 全局配置 (Global Config)
+# ================================================================
 GLOBAL_CONFIG = {
-    'BATCH_SIZE': 200,  # *减小批量以缩短锁持有时间，改善 AIAnalysisWorker 并发*
+    'BATCH_SIZE': 200,  # 减小批量以缩短锁持有时间，改善 AIAnalysisWorker 并发
     'MAX_RETRIES': 3,
     'BACKUP_RETENTION_COUNT': 5,
     'LOG_FILE': 'persistence.log',
@@ -23,25 +23,25 @@ GLOBAL_CONFIG = {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
-# *设置 Django 环境*
+# 设置 Django 环境
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'renhangxi_tiktok_bysj.settings')
 
-# *================================================================*
-# *Safe Lazy Loading Django (防止重入错误)*
-# *使用双重检查: 先检查 apps.ready，再用 try-except 兜底*
-# *================================================================*
+# ================================================================
+# Safe Lazy Loading Django (防止重入错误)
+# 使用双重检查: 先检查 apps.ready，再用 try-except 兜底
+# ================================================================
 try:
     if not django.apps.apps.ready:
         django.setup()
 except RuntimeError as e:
-    # *如果错误是 "populate() isn't reentrant"，说明 Django 已在初始化中，安全忽略*
+    # 如果错误是 "populate() isn't reentrant"，说明 Django 已在初始化中，安全忽略
     if "populate() isn't reentrant" not in str(e):
         raise e
 
-# *导入模型 (必须在 setup 之后)*
+# 导入模型 (必须在 setup 之后)
 from renhangxi_tiktok_bysj.douyin_hangxi.models import Video, Comment
 
-# *配置日志*
+# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -77,7 +77,7 @@ class DatabaseBackupService:
             shutil.copy2(db_path, backup_path)
             logger.info(f"*数据库已备份至: {backup_path}*")
             
-            # *保留最近 N 份备份，清理旧文件*
+            # 保留最近 N 份备份，清理旧文件
             DatabaseBackupService._cleanup_old_backups(backup_dir)
             return backup_path
             
@@ -110,17 +110,17 @@ class UnifiedPersistenceManager:
     _lock = threading.Lock()
 
     def __new__(cls):
-        # *双重检查锁定模式 (Double-Checked Locking)*
+        # 双重检查锁定模式 (Double-Checked Locking)
         if cls._instance is None:
             with cls._lock:
-                # *二次检查，防止多线程竞争*
+                # 二次检查，防止多线程竞争
                 if cls._instance is None:
                     cls._instance = super(UnifiedPersistenceManager, cls).__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        # *确保 __init__ 只执行一次*
+        # 确保 __init__ 只执行一次
         if self._initialized:
             return
         self._initialized = True
@@ -132,7 +132,19 @@ class UnifiedPersistenceManager:
             return ""
         if isinstance(text, float):
             return ""
-        return str(text).strip()
+        cleaned = str(text).strip()
+        if cleaned.lower() in {"nan", "none", "null"}:
+            return ""
+        return cleaned
+
+    def _normalize_video_id(self, value):
+        """*标准化视频 ID，过滤 NaN/None 等脏值*"""
+        vid = self._clean_text(value)
+        return vid
+
+    def _clean_local_path(self, value):
+        """*标准化本地路径字段，避免 float/NaN 进入业务逻辑*"""
+        return self._clean_text(value)
 
     def _safe_int(self, value, default=0):
         """*安全整数转换*"""
@@ -161,30 +173,39 @@ class UnifiedPersistenceManager:
         max_retries = GLOBAL_CONFIG['MAX_RETRIES']
         retry_count = 0
         
-        # *数据预处理: 提取视频 ID*
-        vid = raw_data.get('视频ID') or raw_data.get('video_id')
+        # 数据预处理: 提取视频 ID
+        vid = self._normalize_video_id(raw_data.get('视频ID') or raw_data.get('video_id'))
         if not vid:
             logger.warning("*跳过无效视频数据: 缺少 ID*")
             return False
 
-        # *提取 local_temp_path 并判断是否为有效路径*
-        local_temp_path = raw_data.get('local_temp_path', '') or ''
-        has_valid_local_path = bool(local_temp_path and local_temp_path.strip())
+        # 提取 local_temp_path 并判断是否为有效路径
+        local_temp_path = self._clean_local_path(raw_data.get('local_temp_path', '') or '')
 
-        # *================================================================*
-        # *Theme Label Appending Logic: 保留多主题关联*
-        # *================================================================*
-        existing_theme = Video.objects.filter(video_id=vid).values_list('theme_label', flat=True).first()
+        # ================================================================
+        # Theme Label Appending Logic & Path Protection (Race Condition Fix)
+        # ================================================================
+        existing_video = Video.objects.filter(video_id=vid).only('theme_label', 'local_temp_path').first()
         
-        if existing_theme and existing_theme.strip() and theme_label not in existing_theme:
-            # *追加新主题到现有主题列表*
-            final_theme = f"{existing_theme},{theme_label}"
-            logger.info(f"*Appending theme: {existing_theme} -> {final_theme}*")
+        if existing_video:
+            existing_theme = existing_video.theme_label
+            if existing_theme and existing_theme.strip() and theme_label not in existing_theme:
+                # 追加新主题到现有主题列表
+                final_theme = f"{existing_theme},{theme_label}"
+                logger.info(f"*Appending theme: {existing_theme} -> {final_theme}*")
+            else:
+                # 主题已存在，直接使用当前主题
+                final_theme = theme_label
+                
+            # [CRITICAL FIX] 防止后置入库服务读取旧 CSV 数据覆盖掉已抢救下载的本地路径
+            if not local_temp_path and existing_video.local_temp_path:
+                local_temp_path = existing_video.local_temp_path
+                logger.debug(f"*保护有效下载路径不被空值覆盖: {vid}*")
         else:
-            # *首次创建或主题已存在，直接使用当前主题*
+            # 首次创建
             final_theme = theme_label
 
-        # *字段映射与清洗*
+        # 字段映射与清洗
         defaults = {
             'theme_label': final_theme,
             'nickname': self._hash_pii(self._clean_text(raw_data.get('用户名') or raw_data.get('nickname'))),
@@ -200,36 +221,39 @@ class UnifiedPersistenceManager:
             'local_temp_path': local_temp_path,
         }
 
-        # *[Status Guard Hotfix] Status reset logic moved to post-save to prevent race conditions*
+        # [Status Guard Hotfix] Status reset logic moved to post-save to prevent race conditions
 
-        # *时间格式化尝试*
+        # 时间格式化尝试
         try:
             if isinstance(defaults['create_time'], str):
                 defaults['create_time'] = pd.to_datetime(defaults['create_time'])
         except Exception:
             defaults['create_time'] = datetime.now()
 
-        # *重试循环*
+        # 重试循环
         while retry_count < max_retries:
             try:
-                # *原子性更新或创建*
+                # 原子性更新或创建
                 obj, created = Video.objects.update_or_create(
-                    video_id=str(vid),
+                    video_id=vid,
                     defaults=defaults
                 )
                 
-                # *[Status Guard Race Condition Fix] Atomic State Update*
-                # *Force 'created' items to Pending (0).*
-                # *For existing items, reset to Pending (0) ONLY IF they are NOT currently Analyzed (2).*
+                # [Status Guard Race Condition Fix] Atomic State Update
+                # Force 'created' items to Pending (0).
+                # For existing items, reset to Pending (0) ONLY IF they are NOT currently Analyzed (2).
                 if created:
-                    obj.analysis_status = 0
+                    # 仅当本地文件路径已就绪时才进入待分析队列
+                    obj.analysis_status = 0 if local_temp_path else obj.analysis_status
                     obj.save(update_fields=['analysis_status'])
-                    status_msg = "Initialized Status=0"
+                    status_msg = "Initialized Status=0" if local_temp_path else "Initialized (No Local File Yet)"
                 else:
-                    # *Atomic DB-level conditional update to prevent race conditions*
-                    # *Returns number of rows matched (1 if updated, 0 if skipped due to guard)*
-                    rows = Video.objects.filter(video_id=vid).exclude(analysis_status=2).update(analysis_status=0)
-                    status_msg = "Status Reset to 0" if rows > 0 else "Status Guard Active (Skipped Reset)"
+                    # 仅当文件已落地时才重置为 Pending，避免 AI 提前消费
+                    if local_temp_path:
+                        rows = Video.objects.filter(video_id=vid).exclude(analysis_status=2).update(analysis_status=0)
+                        status_msg = "Status Reset to 0" if rows > 0 else "Status Guard Active (Skipped Reset)"
+                    else:
+                        status_msg = "Skipped Status Reset (No Local File)"
 
                 action = "创建" if created else "更新"
                 logger.debug(f"*{action}视频记录: {vid} | {status_msg}*")
@@ -254,14 +278,103 @@ class UnifiedPersistenceManager:
         """
         if not video_list:
             return 0
-        
-        success_count = 0
+
+        batch_size = GLOBAL_CONFIG['BATCH_SIZE']
+        deduped_payload = {}
+
+        for raw_data in video_list:
+            vid = self._normalize_video_id(raw_data.get('视频ID') or raw_data.get('video_id'))
+            if not vid:
+                continue
+            deduped_payload[vid] = raw_data
+
+        if not deduped_payload:
+            return 0
+
+        try:
+            existing_videos = Video.objects.filter(
+                video_id__in=list(deduped_payload.keys())
+            ).in_bulk(field_name='video_id')
+        except Exception as query_err:
+            logger.error(f"*批量查询视频失败: {query_err}*")
+            return 0
+
+        create_objects = []
+        update_objects = []
+        mutable_fields = [
+            'theme_label', 'nickname', 'desc', 'create_time', 'duration',
+            'follower_count', 'digg_count', 'comment_count', 'collect_count',
+            'share_count', 'download_count', 'local_temp_path', 'analysis_status'
+        ]
+
+        for vid, raw_data in deduped_payload.items():
+            existing_video = existing_videos.get(vid)
+            local_temp_path = self._clean_local_path(raw_data.get('local_temp_path', '') or '')
+
+            if existing_video:
+                existing_theme = existing_video.theme_label or ''
+                if existing_theme.strip() and theme_label not in existing_theme:
+                    final_theme = f"{existing_theme},{theme_label}"
+                else:
+                    final_theme = existing_theme or theme_label
+
+                if not local_temp_path and existing_video.local_temp_path:
+                    local_temp_path = existing_video.local_temp_path
+            else:
+                final_theme = theme_label
+
+            defaults = {
+                'theme_label': final_theme,
+                'nickname': self._hash_pii(self._clean_text(raw_data.get('用户名') or raw_data.get('nickname'))),
+                'desc': self._clean_text(raw_data.get('视频描述') or raw_data.get('desc')),
+                'create_time': raw_data.get('发表时间') or raw_data.get('create_time'),
+                'duration': raw_data.get('视频时长') or raw_data.get('duration'),
+                'follower_count': self._safe_int(raw_data.get('粉丝数量') or raw_data.get('follower_count')),
+                'digg_count': self._safe_int(raw_data.get('点赞数量') or raw_data.get('digg_count')),
+                'comment_count': self._safe_int(raw_data.get('评论数量') or raw_data.get('comment_count')),
+                'collect_count': self._safe_int(raw_data.get('收藏数量') or raw_data.get('collect_count')),
+                'share_count': self._safe_int(raw_data.get('分享数量') or raw_data.get('share_count')),
+                'download_count': self._safe_int(raw_data.get('下载数量') or raw_data.get('download_count')),
+                'local_temp_path': local_temp_path,
+            }
+
+            try:
+                if isinstance(defaults['create_time'], str):
+                    defaults['create_time'] = pd.to_datetime(defaults['create_time'])
+            except Exception:
+                defaults['create_time'] = datetime.now()
+
+            if existing_video:
+                for field_name, value in defaults.items():
+                    setattr(existing_video, field_name, value)
+                # 仅在本地文件可用时重置为 Pending，避免触发提前分析
+                if local_temp_path and existing_video.analysis_status != 2:
+                    existing_video.analysis_status = 0
+                update_objects.append(existing_video)
+            else:
+                create_objects.append(Video(
+                    video_id=vid,
+                    analysis_status=0,
+                    **defaults
+                ))
+
         try:
             with transaction.atomic():
-                for raw_data in video_list:
-                    if self.save_video_record(raw_data, theme_label):
-                        success_count += 1
-            logger.info(f"*批量写入视频元数据成功: {success_count}/{len(video_list)} 条*")
+                if create_objects:
+                    Video.objects.bulk_create(
+                        create_objects,
+                        batch_size=batch_size,
+                        ignore_conflicts=True
+                    )
+                if update_objects:
+                    Video.objects.bulk_update(
+                        update_objects,
+                        mutable_fields,
+                        batch_size=batch_size
+                    )
+
+            success_count = len(create_objects) + len(update_objects)
+            logger.info(f"*批量写入视频元数据成功: {success_count}/{len(deduped_payload)} 条*")
             return success_count
         except Exception as e:
             logger.error(f"*批量写入视频元数据失败，事务已回滚: {e}*")
@@ -278,7 +391,7 @@ class UnifiedPersistenceManager:
         if not comment_list:
             return 0
 
-        # *1. 提取所有涉及的 Video ID，确保外键存在*
+        # 1. 提取所有涉及的 Video ID，确保外键存在
         video_ids = set(
             str(c.get('视频ID') or c.get('video_id')) 
             for c in comment_list 
@@ -298,15 +411,15 @@ class UnifiedPersistenceManager:
             vid = str(c_data.get('视频ID') or c_data.get('video_id') or '')
             cid = str(c_data.get('评论ID') or c_data.get('comment_id') or '')
             
-            # *外键校验: 跳过孤儿评论*
+            # 外键校验: 跳过孤儿评论
             if vid not in existing_videos:
                 skipped_count += 1
                 continue
             
-            # *内容清洗*
+            # 内容清洗
             content = self._clean_text(c_data.get('评论内容') or c_data.get('content'))
             
-            # *时间解析*
+            # 时间解析
             try:
                 create_time = pd.to_datetime(
                     c_data.get('评论时间') or c_data.get('create_time') or datetime.now()
@@ -314,7 +427,7 @@ class UnifiedPersistenceManager:
             except Exception:
                 create_time = datetime.now()
             
-            # *构建模型对象 (不立即保存)*
+            # 构建模型对象 (不立即保存)
             comment_obj = Comment(
                 comment_id=cid,
                 video=existing_videos[vid],
@@ -335,14 +448,14 @@ class UnifiedPersistenceManager:
                 logger.warning(f"*跳过 {skipped_count} 条孤儿评论 (关联视频不存在)*")
             return 0
 
-        # *2. 分批写入，使用事务保证原子性*
+        # 2. 分批写入，使用事务保证原子性
         total_inserted = 0
         
         try:
             with transaction.atomic():
                 for i in range(0, len(valid_objects), batch_size):
                     batch = valid_objects[i:i + batch_size]
-                    # *ignore_conflicts=True: 忽略主键冲突 (幂等性)*
+                    # ignore_conflicts=True: 忽略主键冲突 (幂等性)
                     Comment.objects.bulk_create(batch, ignore_conflicts=True)
                     total_inserted += len(batch)
             
@@ -387,7 +500,7 @@ class UnifiedPersistenceManager:
 
 
 if __name__ == "__main__":
-    # *单例测试*
+    # 单例测试
     manager1 = UnifiedPersistenceManager()
     manager2 = UnifiedPersistenceManager()
     

@@ -7,15 +7,15 @@ class Command(BaseCommand):
     help = '*从Comment表重新统计评论数并更新Video表的comment_count字段*'
 
     def handle(self, *args, **options):
-        # *从数据库统计每个视频的实际评论数*
+        # 从数据库统计每个视频的实际评论数
         comment_stats = Comment.objects.values('video_id').annotate(
             actual_count=Count('comment_id')
         )
 
-        # *转换为字典*
+        # 转换为字典
         actual_counts = {item['video_id']: item['actual_count'] for item in comment_stats}
 
-        # *更新Video表中的comment_count字段*
+        # 更新Video表中的comment_count字段
         videos = Video.objects.all()
         updated_count = 0
         

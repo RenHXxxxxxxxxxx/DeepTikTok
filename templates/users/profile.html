@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block content %}
-<!-- *前端重构：B 端 SaaS 业务系统的架构级控制中心面板* -->
+<!-- 前端重构：B 端 SaaS 业务系统的架构级控制中心面板 -->
 <div class="container-fluid mt-4">
     {% if error_msg %}
     <div class="alert alert-danger shadow-sm border-0 border-start border-4 border-danger">
@@ -11,9 +11,9 @@
     {% endif %}
 
     <div class="row">
-        <!-- *左侧视图栏：账户权限层与底层算力集群探针* -->
+        <!-- 左侧视图栏：账户权限层与底层算力集群探针 -->
         <div class="col-lg-4">
-            <!-- *身份追踪：超管权限标识* -->
+            <!-- 身份追踪：超管权限标识 -->
             <div class="card shadow-sm mb-4 border-0">
                 <div class="card-body text-center bg-dark text-white rounded-3">
                     <h5 class="fw-bold mb-1">{{ user.username }}</h5>
@@ -22,12 +22,12 @@
                 </div>
             </div>
 
-            <!-- *API 集成与核心调度信息 (SaaS Quota Display)* -->
+            <!-- API 集成与核心调度信息 (SaaS Quota Display) -->
             <div class="card shadow-sm mb-4 border-0 border-start border-4 border-secondary">
                 <div class="card-header bg-white fw-bold">
                     <i class="fas fa-microchip me-2 text-secondary"></i>API 集成与权益
                 </div>
-                <!-- *新增的真实API Key配置表单* -->
+                <!-- 新增的真实API Key配置表单 -->
                 <div class="card-body bg-light pb-2">
                     <form method="POST" action="{% url 'profile' %}">
                         {% csrf_token %}
@@ -52,9 +52,9 @@
             </div>
         </div>
 
-        <!-- *右侧视图栏：数据池水位监控与安全审计追踪* -->
+        <!-- 右侧视图栏：数据池水位监控与安全审计追踪 -->
         <div class="col-lg-8">
-            <!-- *核心数据容器规模仪表盘 (Data Assets Monitor)* -->
+            <!-- 核心数据容器规模仪表盘 (Data Assets Monitor) -->
             <div class="row mb-4">
                 <div class="col-md-6">
                     <div class="card shadow-sm border-0 border-top border-4 border-primary">
@@ -76,7 +76,7 @@
                 </div>
             </div>
 
-            <!-- *由于用户请求已被移除的部分* -->
+            <!-- 由于用户请求已被移除的部分 -->
         </div>
     </div>
 </div>

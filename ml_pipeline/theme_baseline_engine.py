@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
 """
 theme_baseline_engine.py
 # *主题基准统计引擎 - 纯统计学计算模块，不依赖机器学习模型*
@@ -9,15 +9,15 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 import logging
 
-# *配置日志*
+# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# *全局配置字典*
+# 全局配置字典
 GLOBAL_CONFIG = {
-    # *最小有效样本量阈值*
+    # 最小有效样本量阈值
     'MIN_SAMPLE_SIZE': 5,
-    # *默认全网平均基准值（当样本不足时使用）*
+    # 默认全网平均基准值（当样本不足时使用）
     'DEFAULT_BASELINE': {
         'mean': 10000.0,
         'std': 25000.0,
@@ -59,7 +59,7 @@ def calculate_optimal_publishing_times(video_data_list: List[Dict[str, Any]], to
     bandwidth = 1.5
     
     for h, w in zip(hours, weights):
-        # *环形距离计算*
+        # 环形距离计算
         diff = np.minimum((grid - h) % 24, (h - grid) % 24)
         density += w * np.exp(-0.5 * (diff / bandwidth)**2)
         
@@ -67,7 +67,7 @@ def calculate_optimal_publishing_times(video_data_list: List[Dict[str, Any]], to
     
     results = []
     for idx in top_indices:
-        # *确保时间窗口至少间隔2小时*
+        # 确保时间窗口至少间隔2小时
         if all(min((idx - r) % 24, (r - idx) % 24) >= 2 for r in results):
             results.append(idx)
         if len(results) >= top_n:
@@ -111,11 +111,11 @@ class ThemeBaselineCalculator:
         #     *清洗后的 digg_count Series*
         """
         try:
-            # *提取 digg_count 字段*
+            # 提取 digg_count 字段
             digg_counts = []
             for item in video_data_list:
                 digg_count = item.get('digg_count')
-                # *过滤 None 和负数*
+                # 过滤 None 和负数
                 if digg_count is not None and isinstance(digg_count, (int, float)) and digg_count >= 0:
                     digg_counts.append(float(digg_count))
                 else:
@@ -140,13 +140,13 @@ class ThemeBaselineCalculator:
         #     *包含统计值的字典*
         """
         try:
-            # *Step 1: 数据清洗*
+            # Step 1: 数据清洗
             cleaned_data = self._clean_data(video_data_list)
             sample_count = len(cleaned_data)
             
             logger.info(f"# *清洗后有效样本量: {sample_count}*")
             
-            # *Step 2: 基础统计计算 (Local Stats)*
+            # Step 2: 基础统计计算 (Local Stats)
             if sample_count > 0:
                 local_stats = {
                     'mean': float(np.mean(cleaned_data)),
@@ -159,15 +159,15 @@ class ThemeBaselineCalculator:
             else:
                 local_stats = None
 
-            # *Step 3: 贝叶斯平滑逻辑 (Bayesian Smoothing)*
-            # *公式: Smoothed = (N * Local + K * Global) / (N + K)*
+            # Step 3: 贝叶斯平滑逻辑 (Bayesian Smoothing)
+            # 公式: Smoothed = (N  Local + K  Global) / (N + K)
             
             if global_stats and isinstance(global_stats, dict):
-                # *如果有全局基准，进行平滑*
+                # 如果有全局基准，进行平滑
                 k = smoothing_factor
                 n = sample_count
                 
-                # *辅助函数: 平滑单个指标*
+                # 辅助函数: 平滑单个指标
                 def smooth_val(key):
                     local_val = local_stats.get(key, 0) if local_stats else 0
                     global_val = global_stats.get(key, 0)
@@ -178,7 +178,7 @@ class ThemeBaselineCalculator:
 
                 final_stats = {
                     'mean': smooth_val('mean'),
-                    'std': smooth_val('std'), # *标准差平滑仅作参考*
+                    'std': smooth_val('std'), # 标准差平滑仅作参考
                     'p25': smooth_val('p25'),
                     'p50': smooth_val('p50'),
                     'p75': smooth_val('p75'),
@@ -192,7 +192,7 @@ class ThemeBaselineCalculator:
                 return final_stats
                 
             else:
-                # *无全局基准，退回原逻辑*
+                # 无全局基准，退回原逻辑
                 if sample_count < self.min_sample_size:
                     logger.warning(f"# *样本量不足且无全局基准，返回默认值*")
                     result = self.default_baseline.copy()
@@ -225,9 +225,9 @@ def calculate_theme_stats(video_data_list: List[Dict[str, Any]],
 
 
 if __name__ == "__main__":
-    # *测试用例*
+    # 测试用例
     
-    # *测试用例1: 正常数据*
+    # 测试用例1: 正常数据
     test_data_normal = [
         {'digg_count': 1000, 'title': 'Video 1'},
         {'digg_count': 2500, 'title': 'Video 2'},
@@ -243,13 +243,13 @@ if __name__ == "__main__":
     print(f"结果: {result1}")
     print()
     
-    # *测试用例2: 包含无效数据*
+    # 测试用例2: 包含无效数据
     test_data_with_invalid = [
         {'digg_count': 1000},
-        {'digg_count': None},  # *无效*
-        {'digg_count': -500},  # *无效*
+        {'digg_count': None},  # 无效
+        {'digg_count': -500},  # 无效
         {'digg_count': 2000},
-        {'digg_count': 'abc'},  # *无效*
+        {'digg_count': 'abc'},  # 无效
         {'digg_count': 3000},
         {'digg_count': 1500},
         {'digg_count': 4000},
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     print(f"结果: {result2}")
     print()
     
-    # *测试用例3: 样本量不足*
+    # 测试用例3: 样本量不足
     test_data_insufficient = [
         {'digg_count': 1000},
         {'digg_count': 2000},
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     print(f"结果: {result3}")
     print()
     
-    # *测试用例4: 使用类接口和自定义配置*
+    # 测试用例4: 使用类接口和自定义配置
     custom_config = {
         'MIN_SAMPLE_SIZE': 3,
         'DEFAULT_BASELINE': {

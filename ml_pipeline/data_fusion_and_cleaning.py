@@ -21,7 +21,7 @@ def clean_and_fusion():
 
     # 1. 加载数据
     if not os.path.exists(VIDEO_DATA_PATH) or not os.path.exists(COMMENT_DATA_PATH):
-        print("❌ 错误：找不到输入的 CSV 文件，请检查路径。")
+        print(" 错误：找不到输入的 CSV 文件，请检查路径。")
         return
 
     v_df = pd.read_csv(VIDEO_DATA_PATH)
@@ -87,10 +87,10 @@ def clean_and_fusion():
     final_df.to_csv(FINAL_OUTPUT_PATH, index=False, encoding='utf_8_sig')
 
     print("\n" + "=" * 50)
-    print(f"✅ 清洗与融合任务完成！")
-    print(f"📊 最终样本量: {len(final_df)} 条")
-    print(f"💎 最终维度数: {len(final_df.columns)} 维")
-    print(f"💾 产物路径: {FINAL_OUTPUT_PATH}")
+    print(f" 清洗与融合任务完成！")
+    print(f" 最终样本量: {len(final_df)} 条")
+    print(f" 最终维度数: {len(final_df.columns)} 维")
+    print(f" 产物路径: {FINAL_OUTPUT_PATH}")
     print("=" * 50)
 
 

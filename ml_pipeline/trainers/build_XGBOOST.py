@@ -17,9 +17,9 @@ from sklearn.metrics import (
 import xgboost as xgb
 from tqdm import tqdm
 
-# *核心路径解析与Django环境配置*
+# 核心路径解析与Django环境配置
 current_dir = os.path.dirname(os.path.abspath(__file__))
-outer_root = os.path.dirname(os.path.dirname(current_dir))  # *[重构] 现位于 ml_pipeline/trainers/，需上两级至项目根*
+outer_root = os.path.dirname(os.path.dirname(current_dir))  # [重构] 现位于 ml_pipeline/trainers/，需上两级至项目根
 django_inner_root = os.path.join(outer_root, 'renhangxi_tiktok_bysj')
 
 if outer_root in sys.path:
@@ -31,13 +31,13 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
 try:
     django.setup()
 except Exception as e:
-    # *保护环境初始化*
+    # 保护环境初始化
     print(f"[ERROR] Django setup failed: {str(e)}")
 
 from django.apps import apps
 Video = apps.get_model('douyin_hangxi', 'Video')
 
-# *全局配置项：避免魔法数字硬编码*
+# 全局配置项：避免魔法数字硬编码
 GLOBAL_CONFIG = {
     'test_size': 0.2,
     'random_state': 42,
@@ -59,7 +59,7 @@ GLOBAL_CONFIG = {
     }
 }
 
-# *基础工具函数*
+# 基础工具函数
 def convert_duration_to_seconds(duration_str):
     try:
         d_str = str(duration_str).strip()
@@ -71,17 +71,17 @@ def convert_duration_to_seconds(duration_str):
                 return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
         return int(float(d_str))
     except Exception:
-        # *异常处理保证健壮性*
+        # 异常处理保证健壮性
         return 0
 
-# *主流程*
+# 主流程
 def build_multimodal_model():
     version_id = datetime.datetime.now().strftime("v%Y%m%d_%H%M%S")
     print(f"[INFO] Step 1/5: Starting training pipeline | Version: {version_id}")
     print(f"[INFO] Mode: XGBoost GPU-Accelerated (RTX 3060 CUDA)")
 
     try:
-        # *保护数据库查询阶段*
+        # 保护数据库查询阶段
         queryset = Video.objects.annotate(
             avg_sentiment=Avg('comments__sentiment_score')
         ).values(
@@ -106,7 +106,7 @@ def build_multimodal_model():
         df['duration_sec'] = df['duration'].apply(convert_duration_to_seconds)
         df['publish_hour'] = pd.to_datetime(df['create_time']).dt.hour
 
-        # *处理离散主题特征，依据要求保留get_dummies形式不使用OneHotEncoder*
+        # 处理离散主题特征，依据要求保留get_dummies形式不使用OneHotEncoder
         print(f"[INFO] Step 2.1/5: Processing Theme Labels...")
         df['theme_label'] = df['theme_label'].fillna('Unknown')
         theme_dummies = pd.get_dummies(df['theme_label'], prefix='theme')
@@ -115,7 +115,7 @@ def build_multimodal_model():
         
         df = pd.concat([df, theme_dummies], axis=1)
 
-        # *聚合所有基础特征（不含标签）*
+        # 聚合所有基础特征（不含标签）
         base_features = [
             'duration_sec', 'follower_count', 'publish_hour',
             'avg_sentiment', 'visual_brightness', 'visual_saturation', 
@@ -125,16 +125,16 @@ def build_multimodal_model():
         X = df[base_features].copy()
         y_original = df['digg_count'].values
 
-        # *在任何特征计算、截断、缺失值处理之前先拆分数据集，杜绝数据泄露*
+        # 在任何特征计算、截断、缺失值处理之前先拆分数据集，杜绝数据泄露
         X_train, X_test, y_train_orig_pre, y_test_orig = train_test_split(
             X, y_original, test_size=GLOBAL_CONFIG['test_size'], random_state=GLOBAL_CONFIG['random_state']
         )
         
-        # *拷贝以防止视图修改警告*
+        # 拷贝以防止视图修改警告
         X_train = X_train.copy()
         X_test = X_test.copy()
 
-        # *仅在训练集上计算阈值并应用截断，防止目标变量泄露*
+        # 仅在训练集上计算阈值并应用截断，防止目标变量泄露
         cap_value = pd.Series(y_train_orig_pre).quantile(GLOBAL_CONFIG['cap_quantile'])
         y_train_orig = np.clip(y_train_orig_pre, 0, cap_value)
         print(f"[INFO] Outlier Cap Applied ONLY to Train: digg_count capped at {cap_value:.0f}")
@@ -142,17 +142,17 @@ def build_multimodal_model():
         y_train = np.log1p(y_train_orig)
         y_test = np.log1p(y_test_orig)
 
-        # *仅在训练集上计算中位数并在训练和测试集进行插补，防止特征泄露*
+        # 仅在训练集上计算中位数并在训练和测试集进行插补，防止特征泄露
         impute_cols = ['avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm']
         for col in impute_cols:
             median_val = X_train[col].median()
             if pd.isna(median_val):
-                # *兜底保护*
+                # 兜底保护
                 median_val = GLOBAL_CONFIG['default_fallback'].get(col, 0)
             X_train.loc[:, col] = X_train[col].fillna(median_val)
             X_test.loc[:, col] = X_test[col].fillna(median_val)
 
-        # *衍生特征生成，分别在训练与测试集上独立执行确保无泄露*
+        # 衍生特征生成，分别在训练与测试集上独立执行确保无泄露
         for ds in [X_train, X_test]:
             ds.loc[:, 'visual_impact'] = (ds['visual_brightness'] * ds['visual_saturation']) / 1000.0
             ds.loc[:, 'sensory_pace'] = ds['audio_bpm'] * ds['cut_frequency']
@@ -176,7 +176,7 @@ def build_multimodal_model():
         X_test_scaled = scaler.transform(X_test)
 
     except Exception as e:
-        # *捕获数据预处理及切割过程中的异常*
+        # 捕获数据预处理及切割过程中的异常
         print(f"[ERROR] Data preprocessing failed: {str(e)}")
         return
 
@@ -190,10 +190,10 @@ def build_multimodal_model():
         best_params = None
         best_cv_std = 0.0
 
-        # *记录训练开始时间*
+        # 记录训练开始时间
         train_start = time.time()
 
-        # *清洁的tqdm原生循环遍历参数网格*
+        # 清洁的tqdm原生循环遍历参数网格
         for params in tqdm(param_list, desc="Hyperparameter Tuning", ncols=100, colour='green', leave=True):
             temp_model = xgb.XGBRegressor(
                 objective='reg:squarederror',
@@ -207,7 +207,7 @@ def build_multimodal_model():
                 verbosity=0,
                 **params
             )
-            # *该参数组合的5折交叉验证*
+            # 该参数组合的5折交叉验证
             scores = cross_val_score(temp_model, X_train_scaled, y_train,
                                      cv=GLOBAL_CONFIG['cv_folds'], scoring='r2',
                                      n_jobs=GLOBAL_CONFIG['n_jobs'])
@@ -238,12 +238,12 @@ def build_multimodal_model():
         )
         model.fit(X_train_scaled, y_train)
 
-        # *记录训练总耗时*
+        # 记录训练总耗时
         train_elapsed = time.time() - train_start
         print(f"[INFO] Total training wall-clock time: {train_elapsed:.1f}s")
 
     except Exception as e:
-        # *保护训练过程与网格搜索*
+        # 保护训练过程与网格搜索
         print(f"[ERROR] Model training failed: {str(e)}")
         return
 
@@ -252,11 +252,11 @@ def build_multimodal_model():
     try:
         y_pred_log = model.predict(X_test_scaled)
         
-        # *安全阀：裁剪对数预测，防止指数爆炸*
+        # 安全阀：裁剪对数预测，防止指数爆炸
         y_pred_log = np.clip(y_pred_log, 0, GLOBAL_CONFIG['clip_max'])
         y_pred_original = np.expm1(y_pred_log)
 
-        # *核心回归指标计算*
+        # 核心回归指标计算
         r2_log_space = r2_score(y_test, y_pred_log)
         r2_original_space = r2_score(y_test_orig, y_pred_original)
         mae_original = mean_absolute_error(y_test_orig, y_pred_original)
@@ -264,7 +264,7 @@ def build_multimodal_model():
         median_ae_original = median_absolute_error(y_test_orig, y_pred_original)
         evs_log = explained_variance_score(y_test, y_pred_log)
 
-        # *MAPE安全计算：过滤零值样本防止除零*
+        # MAPE安全计算：过滤零值样本防止除零
         nonzero_mask = y_test_orig != 0
         if nonzero_mask.sum() > 0:
             mape_original = mean_absolute_percentage_error(
@@ -273,7 +273,7 @@ def build_multimodal_model():
         else:
             mape_original = float('nan')
 
-        # *汇总指标字典，供后续持久化使用*
+        # 汇总指标字典，供后续持久化使用
         metrics_dict = {
             'r2_log': round(float(r2_log_space), 4),
             'r2_original': round(float(r2_original_space), 4),
@@ -308,24 +308,24 @@ def build_multimodal_model():
             print(f"   {row['Feature']:25s} | {bar} {row['Importance']:.4f}")
 
     except Exception as e:
-        # *评估过程保护*
+        # 评估过程保护
         print(f"[ERROR] Model evaluation failed: {str(e)}")
         return
 
     print(f"\n[INFO] Step 5/5: Persisting model assets...")
     try:
-        assets_dir = os.path.join(outer_root, 'ml_pipeline', 'artifacts')  # *[重构] 产物统一输出至 ml_pipeline/artifacts/*
+        assets_dir = os.path.join(outer_root, 'ml_pipeline', 'artifacts')  # [重构] 产物统一输出至 ml_pipeline/artifacts/
         if not os.path.exists(assets_dir):
             os.makedirs(assets_dir)
 
-        # *共用时间戳保证模型验证匹配*
+        # 共用时间戳保证模型验证匹配
         model_path = os.path.join(assets_dir, f'model_{version_id}.pkl')
         scaler_path = os.path.join(assets_dir, f'scaler_{version_id}.pkl')
 
         joblib.dump(model, model_path)
         joblib.dump(scaler, scaler_path)
 
-        # *维护版本清单供服务端读取，含完整指标用于多模型横向对比*
+        # 维护版本清单供服务端读取，含完整指标用于多模型横向对比
         manifest = {
             'active_version': version_id,
             'model_type': 'XGBoost',
@@ -347,7 +347,7 @@ def build_multimodal_model():
         print(f"\n[DONE] Training pipeline completed. XGBoost GPU model ready.")
 
     except Exception as e:
-        # *落地模型发生故障的阻截*
+        # 落地模型发生故障的阻截
         print(f"[ERROR] Asset persisting failed: {str(e)}")
         return
 

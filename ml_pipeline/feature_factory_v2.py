@@ -43,9 +43,9 @@ class MultiModalFeatureFactory:
 
     def __init__(self):
         print("=" * 60)
-        print("🚀 特征工厂启动 (V5 Force-Link Mode)...")
-        print(f"📍 当前根目录: {ROOT_DIR}")
-        print(f"💻 算力设备: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
+        print(" 特征工厂启动 (V5 Force-Link Mode)...")
+        print(f" 当前根目录: {ROOT_DIR}")
+        print(f" 算力设备: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
 
         # --- 强制环境注入 (Force Environment Injection) ---
         self._inject_ffmpeg_path()
@@ -61,24 +61,24 @@ class MultiModalFeatureFactory:
         if os.path.exists(FFMPEG_MANUAL_PATH):
             # 将路径加入系统 PATH 的最前面，确保优先读取
             os.environ["PATH"] = FFMPEG_MANUAL_PATH + os.pathsep + os.environ["PATH"]
-            print(f"💉 [系统注入] 已强制添加 FFmpeg 路径: {FFMPEG_MANUAL_PATH}")
+            print(f" [系统注入] 已强制添加 FFmpeg 路径: {FFMPEG_MANUAL_PATH}")
         else:
-            print(f"⚠️ [路径警告] 你填写的 FFMPEG_MANUAL_PATH 不存在: {FFMPEG_MANUAL_PATH}")
+            print(f" [路径警告] 你填写的 FFMPEG_MANUAL_PATH 不存在: {FFMPEG_MANUAL_PATH}")
             print("   请检查代码第 28 行是否填写正确！")
 
     def check_environment(self):
         """
         检查系统依赖
         """
-        print("🔍 正在检查系统环境依赖...")
+        print(" 正在检查系统环境依赖...")
 
         # shutil.which 现在应该能通过 injected path 找到 ffmpeg 了
         ffmpeg_path = shutil.which("ffmpeg")
         if ffmpeg_path:
-            print(f"   ✅ FFmpeg 已就绪: {ffmpeg_path}")
+            print(f"    FFmpeg 已就绪: {ffmpeg_path}")
             print("      (音频解码引擎已激活，Librosa 将正常工作)")
         else:
-            print("   ❌ [致命警告] 依然未检测到 FFmpeg！")
+            print("    [致命警告] 依然未检测到 FFmpeg！")
             print("      原因可能为：")
             print("      1. FFMPEG_MANUAL_PATH 填写的路径不对（必须是包含 ffmpeg.exe 的 bin 文件夹）")
             print("      2. 文件夹权限问题")
@@ -137,14 +137,14 @@ class MultiModalFeatureFactory:
         """
         try:
             if not os.path.exists(video_path):
-                print(f"   ❌ [音频错误] 文件不存在: {video_path}")
+                print(f"    [音频错误] 文件不存在: {video_path}")
                 return 120.0
 
             # 这里的 duration=30 意味着只读前30秒
             y, sr = librosa.load(video_path, sr=None, duration=30)
 
             if y is None or len(y) == 0:
-                print("   ⚠️ [音频为空] 无法提取特征")
+                print("    [音频为空] 无法提取特征")
                 return 120.0
 
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -157,11 +157,11 @@ class MultiModalFeatureFactory:
         except Exception as e:
             # 此时如果 FFmpeg 注入成功，这里应该不会再进来了
             file_name = os.path.basename(video_path)
-            print(f"\n   🔴 [音频解析崩溃] 文件: {file_name}")
-            print(f"   🔧 错误摘要: {e}")
+            print(f"\n    [音频解析崩溃] 文件: {file_name}")
+            print(f"    错误摘要: {e}")
             # 如果是 NoBackendError，说明注入还是失败了
             if "NoBackendError" in str(e) or "NoBackendError" in str(type(e)):
-                print("   👉 提示：FFmpeg 路径可能依然没对，请检查 config 区的路径拼写！")
+                print("    提示：FFmpeg 路径可能依然没对，请检查 config 区的路径拼写！")
             else:
                 traceback.print_exc()
 
@@ -169,14 +169,14 @@ class MultiModalFeatureFactory:
 
     def start_factory_line(self):
         if not os.path.exists(INPUT_CSV):
-            print(f"❌ 错误：找不到输入文件 {INPUT_CSV}")
+            print(f" 错误：找不到输入文件 {INPUT_CSV}")
             return
 
         try:
             df = pd.read_csv(INPUT_CSV)
-            print(f"📋 已加载原始数据，共计 {len(df)} 条视频记录。")
+            print(f" 已加载原始数据，共计 {len(df)} 条视频记录。")
         except Exception as e:
-            print(f"❌ 读取 CSV 失败: {e}")
+            print(f" 读取 CSV 失败: {e}")
             return
 
         new_features = []
@@ -195,22 +195,22 @@ class MultiModalFeatureFactory:
 
             print(f"\n[{index + 1}/{len(df)}] 正在加工视频 ID: {video_id}")
             display_path = os.sep.join(full_path.split(os.sep)[-3:])
-            print(f"   📂 目标路径: ...{os.sep}{display_path}")
+            print(f"    目标路径: ...{os.sep}{display_path}")
 
             if not os.path.exists(full_path):
-                print(f"   ⚠️  [跳过] 找不到物理文件: {full_path}")
+                print(f"     [跳过] 找不到物理文件: {full_path}")
                 new_features.append([0.0, 0.0, 0.0, 110.0])
                 continue
 
             start_t = time.time()
-            print(f"   ⚡ 步骤 1: 3060 显卡正在分析画面像素...", end="\r")
+            print(f"    步骤 1: 3060 显卡正在分析画面像素...", end="\r")
             bright, sat, cut_f = self.extract_visual_on_gpu(full_path)
 
-            print(f"   🎵 步骤 2: 正在解析背景音乐节奏...", end="\r")
+            print(f"    步骤 2: 正在解析背景音乐节奏...", end="\r")
             bpm = self.extract_audio_bpm(full_path)
 
             cost_t = time.time() - start_t
-            print(f"   ✅ 加工完成！耗时: {cost_t:.2f}s | 亮度: {bright:.1f} | 切镜: {cut_f:.2f} | BPM: {bpm:.1f}")
+            print(f"    加工完成！耗时: {cost_t:.2f}s | 亮度: {bright:.1f} | 切镜: {cut_f:.2f} | BPM: {bpm:.1f}")
 
             new_features.append([round(bright, 2), round(sat, 2), round(cut_f, 2), round(bpm, 2)])
 
@@ -229,8 +229,8 @@ class MultiModalFeatureFactory:
         final_df.to_csv(OUTPUT_CSV, index=False, encoding='utf_8_sig')
 
         print("\n" + "=" * 60)
-        print("🎉 特征工厂任务结束！")
-        print(f"📁 整合后的完整多模态数据集已保存至: {OUTPUT_CSV}")
+        print(" 特征工厂任务结束！")
+        print(f" 整合后的完整多模态数据集已保存至: {OUTPUT_CSV}")
         print("=" * 60)
 
 

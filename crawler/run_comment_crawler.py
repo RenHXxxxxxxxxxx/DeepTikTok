@@ -5,15 +5,15 @@
 import sys
 import os
 
-# *添加项目路径*
+# 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from data.spyder_unified import run_comment_only_service
 
 if __name__ == "__main__":
-    print("🚀 *启动评论补充采集...*")
-    print("📁 *视频源: douyin_video_非遗手工艺.csv*")
-    print("🎯 *每视频最多采集: 50 条评论*")
+    print(" *启动评论补充采集...*")
+    print(" *视频源: douyin_video_非遗手工艺.csv*")
+    print(" *每视频最多采集: 50 条评论*")
     print("=" * 50)
     
     run_comment_only_service(
@@ -22,4 +22,5 @@ if __name__ == "__main__":
         max_comments=50
     )
     
-    print("\n✅ *评论采集完成！*")
+    print("\n *评论采集完成！*")
+

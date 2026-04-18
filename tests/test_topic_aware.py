@@ -51,7 +51,7 @@ class TestTopicAwarePrediction(unittest.TestCase):
         
         result = self.calculator.calculate(local_data, global_stats=self.global_stats, smoothing_factor=10)
         
-        # Formula: (1000*200 + 10*10000) / 1010 = (200000+100000)/1010 = 297
+        # Formula: (1000200 + 1010000) / 1010 = (200000+100000)/1010 = 297
         expected_mean = (1000 * 200 + 10 * 10000) / 1010
         print(f"\n[Test B] Large Samples (N=1000, Local=200, Global=10000) -> Result: {result['mean']:.2f} (Expected: {expected_mean:.2f})")
         
@@ -66,7 +66,7 @@ class TestTopicAwarePrediction(unittest.TestCase):
         
         result = self.calculator.calculate(local_data, global_stats=self.global_stats, smoothing_factor=10)
         
-        # Formula: (5*200 + 10*10000) / 15 = (1000 + 100000) / 15 = 101000/15 = 6733
+        # Formula: (5200 + 1010000) / 15 = (1000 + 100000) / 15 = 101000/15 = 6733
         expected_mean = (5 * 200 + 10 * 10000) / 15
         print(f"\n[Test C] Small Samples (N=5, Local=200, Global=10000) -> Result: {result['mean']:.2f} (Expected: {expected_mean:.2f})")
         

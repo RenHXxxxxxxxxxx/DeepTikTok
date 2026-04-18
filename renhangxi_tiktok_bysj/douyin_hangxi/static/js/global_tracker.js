@@ -379,7 +379,7 @@ const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
                     // *判断完成条件*
                     if (data.status === 'finished') {
                         const radarMsg = document.getElementById('radar-msg');
-                        if (radarMsg) radarMsg.innerText = "✅ 任务全部完成，正在刷新页面...";
+                        if (radarMsg) radarMsg.innerText = " 任务全部完成，正在刷新页面...";
                         setTimeout(() => window.location.reload(), 1500);
                         return; // *结束轮询*
                     }
@@ -390,7 +390,7 @@ const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
                 .catch(e => {
                     console.error("[GlobalTracker] Modal polling error:", e);
                     const radarMsg = document.getElementById('radar-msg');
-                    if (radarMsg) radarMsg.innerText = "⚠️ 连接断开，但在后台继续运行...";
+                    if (radarMsg) radarMsg.innerText = " 连接断开，但在后台继续运行...";
                     window.modalPollingTimeout = setTimeout(checkStatus, 2000); // *出错后延迟重试*
                 });
         };
@@ -500,7 +500,7 @@ const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
                 const data = await response.json();
 
                 if (data.status === 'success' || data.success) {
-                    safeNotify('🚀 ' + (data.message || '任务启动成功'));
+                    safeNotify(' ' + (data.message || '任务启动成功'));
                     const formEl = document.getElementById('globalSpiderForm');
                     const progressPanel = document.getElementById('global-spider-progress-panel');
                     if (formEl) formEl.classList.add('d-none');
@@ -508,11 +508,11 @@ const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
 
                     if (typeof startModalPolling === 'function') startModalPolling('/api/spider_status/');
                 } else {
-                    safeNotify('❌ 启动失败: ' + data.message);
+                    safeNotify(' 启动失败: ' + data.message);
                 }
             } catch (error) {
-                console.error("🔥 Spider Submit Error:", error);
-                safeNotify('❌ 异常: ' + error.message);
+                console.error(" Spider Submit Error:", error);
+                safeNotify(' 异常: ' + error.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -550,3 +550,4 @@ const GLOBAL_API_CONFIG = window.GLOBAL_API_CONFIG || {
     };
 
 })();
+

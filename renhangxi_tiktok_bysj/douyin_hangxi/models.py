@@ -33,12 +33,12 @@ class Video(models.Model):
     # 视频素材文件
     video_file = models.FileField(upload_to='videos/%Y/%m/%d/', verbose_name="视频原文件", null=True, blank=True)
 
-    # *预测相关字段*
+    # 预测相关字段
     predicted_digg_count = models.IntegerField(null=True, blank=True, verbose_name="预测点赞数")
     actual_vs_predicted_error = models.FloatField(null=True, blank=True, verbose_name="预测偏差率")
 
-    # *异步处理状态跟踪字段*
-    # *语义: 0=待处理(Pending), 1=处理中(Processing), 2=已完成(Completed), -1=失败(Failed)*
+    # 异步处理状态跟踪字段
+    # 语义: 0=待处理(Pending), 1=处理中(Processing), 2=已完成(Completed), -1=失败(Failed)
     analysis_status = models.IntegerField(default=0, db_index=True, verbose_name="AI分析状态")
     local_temp_path = models.CharField(max_length=255, null=True, blank=True, verbose_name="本地临时路径")
 
@@ -95,7 +95,7 @@ from django.contrib.auth.models import User
 class CreatorConfig(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='config', verbose_name="关联用户")
     llm_api_key = models.CharField(max_length=255, blank=True, null=True, verbose_name="大模型API Key")
-    # *建议在生产环境中对llm_api_key进行加密存储，如使用Fernet等加密库*
+    # 建议在生产环境中对llm_api_key进行加密存储，如使用Fernet等加密库
     llm_model_name = models.CharField(max_length=50, default="ernie-4.0-8k", verbose_name="大模型名称")
     
     class Meta:

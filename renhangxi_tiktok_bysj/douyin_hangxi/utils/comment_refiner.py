@@ -45,7 +45,7 @@ class CommentRefiner:
         ]
         for kw in keywords:
             jieba.add_word(kw)
-        print(f"📚 [领域词典] 已挂载 {len(keywords)} 个专业术语 (DeepSeek, Skechers, 3060...)")
+        print(f" [领域词典] 已挂载 {len(keywords)} 个专业术语 (DeepSeek, Skechers, 3060...)")
 
     def _load_stopwords(self):
         """加载外部停用词表"""
@@ -58,11 +58,11 @@ class CommentRefiner:
                         word = line.strip()
                         if word:
                             stopwords.add(word)
-                print(f"✅ [资源加载] 成功加载 {len(stopwords)} 个停用词。")
+                print(f" [资源加载] 成功加载 {len(stopwords)} 个停用词。")
             except Exception as e:
-                print(f"⚠️ 停用词加载异常: {e}")
+                print(f" 停用词加载异常: {e}")
         else:
-            print(f"⚠️ 警告：未找到停用词文件 {self.stopwords_path}，将跳过停用词过滤。")
+            print(f" 警告：未找到停用词文件 {self.stopwords_path}，将跳过停用词过滤。")
         return stopwords
 
     def sanitize_pattern(self, text):
@@ -135,10 +135,10 @@ class CommentRefiner:
         """
         执行批处理洗练任务
         """
-        print(f"\n🚀 [引擎启动] 正在执行：正则去噪 -> 领域分词 -> 情感计算 -> 唯一性校验...")
+        print(f"\n [引擎启动] 正在执行：正则去噪 -> 领域分词 -> 情感计算 -> 唯一性校验...")
 
         if not os.path.exists(self.input_path):
-            print(f"❌ 运行中止：找不到输入文件 {self.input_path}")
+            print(f" 运行中止：找不到输入文件 {self.input_path}")
             return
 
         # 读取原始数据
@@ -148,7 +148,7 @@ class CommentRefiner:
         initial_count = len(df)
 
         # 注册进度条
-        tqdm.pandas(desc="💧 全流程处理中")
+        tqdm.pandas(desc=" 全流程处理中")
 
         # 1. 清洗 (Sanitize) - 用于肉眼阅读和情感分析
         df['清洗文本'] = df['评论内容'].progress_apply(self.sanitize_pattern)
@@ -175,13 +175,13 @@ class CommentRefiner:
         df.to_csv(self.output_path, index=False, encoding='utf-8-sig')
 
         final_count = len(df)
-        print(f"\n📊 洗练任务总结：")
+        print(f"\n 洗练任务总结：")
         print(f"   - 原始记录：{initial_count} 条")
         print(f"   - 剩余精华：{final_count} 条")
         print(f"   - 剔除杂质：{initial_count - final_count} 条")
-        print(f"   - ✨ 核心增强：已生成 'sentiment_score' (情感分) 列")
-        print(f"   - ✨ 核心增强：已保留 'DeepSeek/3060' 等专业术语")
-        print(f"✅ 处理完成！精炼后的 CSV 已生成：{self.output_path}\n")
+        print(f"   -  核心增强：已生成 'sentiment_score' (情感分) 列")
+        print(f"   -  核心增强：已保留 'DeepSeek/3060' 等专业术语")
+        print(f" 处理完成！精炼后的 CSV 已生成：{self.output_path}\n")
 
 
 # ======================================================
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     # 你的目录结构较深，这里保持原逻辑
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(script_path))))
 
-    print(f"📡 目录探测：检测到项目总根目录为 -> {PROJECT_ROOT}")
+    print(f" 目录探测：检测到项目总根目录为 -> {PROJECT_ROOT}")
 
     # 3. 构造路径
     # [注意]：如果你现在跑的是 'Sikachi' 主题，请手动修改下面的文件名！

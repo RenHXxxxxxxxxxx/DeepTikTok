@@ -7,5 +7,6 @@ if db_path.exists():
     conn = sqlite3.connect(db_path)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.execute('PRAGMA synchronous=NORMAL;')
-    print(f"✅ WAL Mode Enabled for: {db_path}")
+    print(f" WAL Mode Enabled for: {db_path}")
     conn.close()
+

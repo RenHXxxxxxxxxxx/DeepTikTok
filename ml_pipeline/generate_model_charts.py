@@ -10,7 +10,7 @@ import seaborn as sns
 from django.db.models import Avg
 from sklearn.model_selection import train_test_split
 
-# *全局配置项：避免硬编码*
+# 全局配置项：避免硬编码
 GLOBAL_CONFIG = {
     'test_size': 0.15,
     'random_state': 42,
@@ -28,22 +28,22 @@ GLOBAL_CONFIG = {
     }
 }
 
-# *配置Matplotlib字体以支持中文*
+# 配置Matplotlib字体以支持中文
 plt.rcParams['font.sans-serif'] = GLOBAL_CONFIG['font_family']
 plt.rcParams['axes.unicode_minus'] = False
 
 def filter_rare_themes(df, min_samples):
-    # *过滤掉样本量低于阈值的稀有主题*
+    # 过滤掉样本量低于阈值的稀有主题
     try:
         theme_counts = df['theme_label'].value_counts()
         valid_themes = theme_counts[theme_counts >= min_samples].index.tolist()
         return df[df['theme_label'].isin(valid_themes)].copy()
     except Exception:
-        # *保护错误返回原数据*
+        # 保护错误返回原数据
         return df.copy()
 
 def convert_duration_to_seconds(duration_str):
-    # *视频时长字符串转换为秒数*
+    # 视频时长字符串转换为秒数
     try:
         d_str = str(duration_str).strip()
         if ':' in d_str:
@@ -54,11 +54,11 @@ def convert_duration_to_seconds(duration_str):
                 return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
         return int(float(d_str))
     except Exception:
-        # *异常处理保证健壮性*
+        # 异常处理保证健壮性
         return 0
 
 def generate_evaluation_charts():
-    # *主流程：读取模型、准备数据、生成图表*
+    # 主流程：读取模型、准备数据、生成图表
     current_dir = os.path.dirname(os.path.abspath(__file__))
     outer_root = os.path.dirname(current_dir)
     django_inner_root = os.path.join(outer_root, 'renhangxi_tiktok_bysj')
@@ -68,7 +68,7 @@ def generate_evaluation_charts():
     if django_inner_root not in sys.path:
         sys.path.insert(0, django_inner_root)
 
-    # *初始化Django环境*
+    # 初始化Django环境
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
     try:
         django.setup()
@@ -77,7 +77,7 @@ def generate_evaluation_charts():
 
     from django.apps import apps
     
-    # *加载资产*
+    # 加载资产
     artifacts_dir = os.path.join(outer_root, 'artifacts')
     manifest_path = os.path.join(artifacts_dir, 'version_manifest.json')
     
@@ -97,10 +97,10 @@ def generate_evaluation_charts():
         print(f"[ERROR] Failed to load artifacts: {str(e)}")
         return
 
-    # *准备数据与执行推断*
+    # 准备数据与执行推断
     try:
         Video = apps.get_model('douyin_hangxi', 'Video')
-        # *保护数据库查询操作*
+        # 保护数据库查询操作
         queryset = Video.objects.annotate(
             avg_sentiment=Avg('comments__sentiment_score')
         ).values(
@@ -118,7 +118,7 @@ def generate_evaluation_charts():
         df['duration_sec'] = df['duration'].apply(convert_duration_to_seconds)
         df['publish_hour'] = pd.to_datetime(df['create_time']).dt.hour
         
-        # *执行与训练完全一致的特征工程逻辑*
+        # 执行与训练完全一致的特征工程逻辑
         df['follower_count_log'] = np.log1p(df['follower_count'])
         df['temp_digg_log'] = np.log1p(df['digg_count'])
         global_mean = df['temp_digg_log'].mean()
@@ -144,7 +144,7 @@ def generate_evaluation_charts():
         X = df[base_features].copy()
         y_original = df['digg_count'].values
         
-        # *切分出测试集以供绘制实际与预测散点图*
+        # 切分出测试集以供绘制实际与预测散点图
         X_train, X_test, y_train_orig_pre, y_test_orig = train_test_split(
             X, y_original, test_size=GLOBAL_CONFIG['test_size'], random_state=GLOBAL_CONFIG['random_state']
         )
@@ -176,7 +176,7 @@ def generate_evaluation_charts():
         
         X_test = X_test[feature_cols]
         
-        # *对齐模型期望输入特征*
+        # 对齐模型期望输入特征
         champ_expected_features = []
         if hasattr(champion_model, 'feature_names_in_'):
             champ_expected_features = champion_model.feature_names_in_
@@ -192,16 +192,16 @@ def generate_evaluation_charts():
             else:
                 X_test_champ[col] = 0.0
                 
-        # *获取预测结果*
+        # 获取预测结果
         X_test_scaled_champion = champion_scaler.transform(X_test_champ)
         champion_preds_log = champion_model.predict(X_test_scaled_champion)
         champion_preds_log = np.clip(champion_preds_log, 0, GLOBAL_CONFIG['clip_max'])
         y_test_log = np.log1p(y_test_orig)
         
-        # *创建导出目录*
+        # 创建导出目录
         os.makedirs(GLOBAL_CONFIG['charts_dir'], exist_ok=True)
         
-        # *图表 1：实际与预测的对数空间散点图*
+        # 图表 1：实际与预测的对数空间散点图
         plt.figure(figsize=(8, 6))
         sns.scatterplot(x=y_test_log, y=champion_preds_log, alpha=0.6, color='blue')
         min_val = min(y_test_log.min(), champion_preds_log.min())
@@ -216,7 +216,7 @@ def generate_evaluation_charts():
         plt.savefig(os.path.join(GLOBAL_CONFIG['charts_dir'], 'scatter_plot_log.png'), dpi=300)
         plt.close()
         
-        # *图表 2：Top 15特征重要性*
+        # 图表 2：Top 15特征重要性
         if hasattr(champion_model, 'feature_importances_'):
             importances = champion_model.feature_importances_
             feature_names = list(champ_expected_features)

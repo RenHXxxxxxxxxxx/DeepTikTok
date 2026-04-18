@@ -36,10 +36,10 @@ urlpatterns = [
     path('register/', views.register, name='register'),
 
     path('api/recalculate_sentiment/', views.recalculate_sentiment_api, name='recalculate_sentiment_api'),
-    # *AI 分析队列状态查询接口*
+    # AI 分析队列状态查询接口
     path('api/get_analysis_status/', views.get_analysis_status_api, name='analysis_status_api'),
-    # *全局系统状态查询接口*
+    # 全局系统状态查询接口
     path('api/global-status/', views.get_global_status, name='global_status'),
-    # *模型重训练 API (Retrain Model Trigger)*
+    # 模型重训练 API (Retrain Model Trigger)
     path('api/retrain_model/', views.retrain_model_api, name='retrain_model_api'),
 ]

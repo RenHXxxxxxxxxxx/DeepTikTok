@@ -13,7 +13,7 @@ from data.spyder_unified import DouyinUnifiedPipeline
 from renhangxi_tiktok_bysj.douyin_hangxi.views import get_global_status
 
 def verify():
-    print("🚀 Starting Verification...")
+    print(" Starting Verification...")
 
     # Mock Request
     request = MagicMock()
@@ -28,9 +28,9 @@ def verify():
     print(f"Response: {data}")
     
     if data['spider_running'] is False:
-        print("✅ PASS: spider_running is False")
+        print(" PASS: spider_running is False")
     else:
-        print("❌ FAIL: spider_running should be False")
+        print(" FAIL: spider_running should be False")
 
     # Test 2: Spider Running
     print("\n[Test 2] Starting Spider Instance...")
@@ -45,14 +45,14 @@ def verify():
         print(f"Response: {data}")
         
         if data['spider_running'] is True:
-            print("✅ PASS: spider_running is True")
+            print(" PASS: spider_running is True")
         else:
-            print("❌ FAIL: spider_running should be True")
+            print(" FAIL: spider_running should be True")
             
         if data['spider_progress']['current'] == 5:
-            print("✅ PASS: Progress current is 5")
+            print(" PASS: Progress current is 5")
         else:
-            print(f"❌ FAIL: Progress mismatch {data['spider_progress']}")
+            print(f" FAIL: Progress mismatch {data['spider_progress']}")
 
         # Test 3: Stop Spider
         print("\n[Test 3] Closing Spider...")
@@ -64,15 +64,16 @@ def verify():
         print(f"Response: {data}")
         
         if data['spider_running'] is False:
-            print("✅ PASS: spider_running is False after close")
+            print(" PASS: spider_running is False after close")
         else:
-            print("❌ FAIL: spider_running should be False after close")
+            print(" FAIL: spider_running should be False after close")
 
     except Exception as e:
-        print(f"❌ Exception during test: {e}")
+        print(f" Exception during test: {e}")
         try:
             spider.close()
         except: pass
 
 if __name__ == "__main__":
     verify()
+

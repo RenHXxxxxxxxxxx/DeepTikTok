@@ -16,7 +16,7 @@
         </div>
     </div>
 
-    <!-- *AI 分析队列进度区块* -->
+    <!-- AI 分析队列进度区块 -->
     <div class="row mb-4" id="analysisProgressContainer">
         <div class="col-12">
             <div class="card border-0 shadow-sm">
@@ -68,7 +68,7 @@
         </div>
     </div>
 
-    <!-- *系统操作面板：AI 模型重训练* -->
+    <!-- 系统操作面板：AI 模型重训练 -->
     <div class="row mb-4" id="systemOpsContainer">
         <div class="col-12">
             <div class="card border-0 shadow-sm">
@@ -76,7 +76,7 @@
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-1 fw-bold">
-                                <i class="fas fa-flask me-2 text-primary"></i>AI 模型管理
+                                <i class="fas fa-flask me-2 text-primary"></i>模型配置管理
                             </h5>
                             <small class="text-muted">当数据分析完成后，可触发模型重训练以获取更精准的预测能力</small>
                         </div>
@@ -96,13 +96,13 @@
     </div>
 </div>
 
-<!-- *Bootstrap 5 Toast 消息容器* -->
+<!-- Bootstrap 5 Toast 消息容器 -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;">
     <div id="retrainToast" class="toast align-items-center border-0" role="alert" aria-live="assertive"
         aria-atomic="true">
         <div class="d-flex">
             <div class="toast-body fw-bold" id="retrainToastBody">
-                <!-- *JS 动态填充* -->
+                <!-- JS 动态填充 -->
             </div>
             <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
                 aria-label="Close"></button>
@@ -160,7 +160,7 @@
 
 
 
-<!-- *AI 通量监控面板 (AI Workflow Throughput Monitor)* -->
+<!-- AI 通量监控面板 (AI Workflow Throughput Monitor) -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card border-0 shadow-sm p-4" style="background-color: #f8f9fa;">
@@ -234,7 +234,7 @@
                         </tr>
                     </thead>
                     <tbody id="commentsTableBody">
-                        <!-- *JS 动态渲染* -->
+                        <!-- JS 动态渲染 -->
                     </tbody>
                 </table>
             </div>
@@ -333,7 +333,7 @@
     });
 </script>
 
-<!-- *Global Task Monitoring Hub - Resilient Poller* -->
+<!-- Global Task Monitoring Hub - Resilient Poller -->
 <script>
     const GlobalMonitor = (function () {
         let pollingInterval = null;
@@ -399,7 +399,7 @@
 
             // *[State Reset & Dynamic Labeling] 主题变化检测与重置*
             if (lastRenderedTheme !== null && lastRenderedTheme !== returnedTheme) {
-                console.log(`[GlobalMonitor] ♻️ 活跃主题改变: ${lastRenderedTheme} -> ${returnedTheme}`);
+                console.log(`[GlobalMonitor]  活跃主题改变: ${lastRenderedTheme} -> ${returnedTheme}`);
                 resetAIProgressBar();
             }
             lastRenderedTheme = returnedTheme;
@@ -557,7 +557,7 @@
     document.addEventListener('ajaxComplete', GlobalMonitor.start);
 </script>
 
-<!-- *AI 模型重训练 AJAX 控制器* -->
+<!-- AI 模型重训练 AJAX 控制器 -->
 <script>
     (function () {
         // *重训练配置*
@@ -640,16 +640,16 @@
                     const data = await response.json();
 
                     if (data.success) {
-                        showToast('✅ ' + (data.message || '模型重训练任务已提交后台执行'), true);
+                        showToast(' ' + (data.message || '模型重训练任务已提交后台执行'), true);
                         // *延迟恢复按钮，给用户缓冲期*
                         setTimeout(() => setButtonLoading(btn, icon, false), 8000);
                     } else {
-                        showToast('❌ ' + (data.message || '重训练请求失败'), false);
+                        showToast(' ' + (data.message || '重训练请求失败'), false);
                         setButtonLoading(btn, icon, false);
                     }
                 } catch (e) {
                     console.error('[Retrain] Fetch Error:', e);
-                    showToast('❌ 网络请求异常，请检查服务器状态', false);
+                    showToast(' 网络请求异常，请检查服务器状态', false);
                     setButtonLoading(btn, icon, false);
                 }
             });
@@ -696,3 +696,4 @@
     });
 </script>
 {% endblock %}
+
