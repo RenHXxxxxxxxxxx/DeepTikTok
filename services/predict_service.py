@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 from django.conf import settings
 
+from ml_pipeline.preprocessing_contract import normalize_preprocessing_spec, resolve_prep_spec_path
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -287,8 +289,11 @@ class DiggPredictionService:
         bundle_manifest['bundle_version_id'] = version_id
         manifest_describes_requested_version = bundle_manifest.get('current_version') == version_id
 
-        model_path = self.artifacts_dir / f'model_{version_id}.pkl'
-        scaler_path = self.artifacts_dir / f'scaler_{version_id}.pkl'
+        bundle_artifacts = bundle_manifest.get('bundle_artifacts', {}) if manifest_describes_requested_version else {}
+        model_file = bundle_artifacts.get('model_file') or f'model_{version_id}.pkl'
+        scaler_file = bundle_artifacts.get('scaler_file') or f'scaler_{version_id}.pkl'
+        model_path = self.artifacts_dir / model_file
+        scaler_path = self.artifacts_dir / scaler_file
         missing_artifacts = [path.name for path in (model_path, scaler_path) if not path.exists()]
         if missing_artifacts:
             logger.error(
@@ -312,7 +317,10 @@ class DiggPredictionService:
             )
             return None
 
-        prep, bundle_mode = self._load_optional_prep_spec(version_id)
+        prep, bundle_mode = self._load_optional_prep_spec(
+            version_id,
+            manifest_payload=bundle_manifest
+        )
         ordered_feature_names, topology_source = self._resolve_ordered_feature_names(
             version_id=version_id,
             manifest_payload=bundle_manifest,
@@ -427,9 +435,13 @@ class DiggPredictionService:
 
         return errors
 
-    def _load_optional_prep_spec(self, version_id: str):
+    def _load_optional_prep_spec(self, version_id: str, manifest_payload: dict = None):
         """按版本加载可选的预处理规格；缺失或无效时保持 legacy compatibility mode。"""
-        prep_path = self.artifacts_dir / f'prep_{version_id}.json'
+        prep_path = resolve_prep_spec_path(
+            self.artifacts_dir,
+            version_id,
+            manifest_payload=manifest_payload
+        )
 
         if not prep_path.exists():
             logger.info(
@@ -440,7 +452,10 @@ class DiggPredictionService:
 
         try:
             with open(prep_path, 'r', encoding='utf-8') as f:
-                prep_spec = json.load(f)
+                prep_spec = normalize_preprocessing_spec(
+                    json.load(f),
+                    version_id=version_id
+                )
 
             if not isinstance(prep_spec, dict):
                 logger.warning(
@@ -676,7 +691,7 @@ class DiggPredictionService:
     ) -> pd.DataFrame:
         """
         构建模型输入特征。
-        优先使用版本 bundle 拥有的预处理真值；display baseline 仅在 legacy compatibility 模式下参与主题编码。
+        优先使用版本 bundle 拥有的预处理真值；display baseline 永远只属于展示层。
         """
         bundle = runtime_bundle or self._get_active_bundle()
 
@@ -733,7 +748,7 @@ class DiggPredictionService:
             self._safe_float(video_data.get('audio_bpm'), numeric_defaults.get('audio_bpm', 110.0))
         )
 
-        # 2.1 主题编码：优先使用版本拥有的 prep 真值；runtime display baseline 只保留给 legacy compatibility。
+        # 2.1 主题编码：优先使用版本拥有的 prep 真值；legacy compatibility 也只使用版本/全局先验。
         if prep_context:
             theme_enc = prep_context['theme_encoded']
             logger.info(
@@ -743,21 +758,22 @@ class DiggPredictionService:
                 prep_context.get('theme_source', 'prep')
             )
         else:
-            theme_count = float(display_theme_baseline.get('count', 10)) if display_theme_baseline else 10.0
-            theme_mean = float(display_theme_baseline.get('mean', 5000)) if display_theme_baseline else 5000.0
-            local_mean_log = np.log1p(theme_mean)
-            global_mean_log = float(bundle.manifest.get('bayesian_global_mean', np.log1p(10000.0)))
-            weight = 10.0
-            theme_enc = (theme_count * local_mean_log + weight * global_mean_log) / (theme_count + weight)
+            theme_enc = float(
+                self._safe_float(
+                    bundle.manifest.get('bayesian_global_mean'),
+                    np.log1p(10000.0)
+                )
+            )
 
-            if bundle.prep:
+            if bundle.is_bundle_aware():
                 logger.warning(
-                    " [Feature Build] 版本 %s 的 prep metadata 缺少可用主题先验；切换到 legacy compatibility 主题编码。",
+                    " [Feature Build] 版本 %s 的 prep metadata 缺少可用主题先验；回退到版本拥有的全局先验，不使用 display baseline。",
                     bundle.version_id
                 )
             else:
                 logger.info(
-                    " [Feature Build] 未加载 prep metadata；沿用 legacy compatibility 主题编码。runtime baseline 不是模型输入的首选真值。"
+                    " [Feature Build] 版本 %s 处于 legacy compatibility；模型输入仅使用版本/全局先验。display baseline 仍只用于展示层。",
+                    bundle.version_id
                 )
 
         # 3. 构造占位 DataFrame

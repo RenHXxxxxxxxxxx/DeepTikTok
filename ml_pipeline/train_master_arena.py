@@ -19,6 +19,29 @@ import lightgbm as lgb
 import xgboost as xgb
 from tqdm import tqdm
 
+try:
+    from ml_pipeline.preprocessing_contract import (
+        apply_numeric_preprocessing as shared_apply_numeric_preprocessing,
+        add_derived_features as shared_add_derived_features,
+        build_feature_matrix as shared_build_feature_matrix,
+        build_preprocessing_spec as shared_build_preprocessing_spec,
+        build_versioned_evaluation_features,
+        normalize_preprocessing_spec,
+        resolve_prep_spec_path,
+        transform_with_preprocessing_context as shared_transform_with_preprocessing_context,
+    )
+except ImportError:
+    from preprocessing_contract import (
+        apply_numeric_preprocessing as shared_apply_numeric_preprocessing,
+        add_derived_features as shared_add_derived_features,
+        build_feature_matrix as shared_build_feature_matrix,
+        build_preprocessing_spec as shared_build_preprocessing_spec,
+        build_versioned_evaluation_features,
+        normalize_preprocessing_spec,
+        resolve_prep_spec_path,
+        transform_with_preprocessing_context as shared_transform_with_preprocessing_context,
+    )
+
 # 核心路径解析与环境配置
 current_dir = os.path.dirname(os.path.abspath(__file__))
 outer_root = os.path.dirname(current_dir)
@@ -128,77 +151,26 @@ def fit_train_owned_theme_encoding(train_df, smoothing_weight):
     }
 
 def build_feature_matrix(df, fitted_theme_encoding, known_theme_cols):
-    # 使用训练集拟合出的主题编码/主题空间来构建特征，保证持出集只做应用不反向影响拟合
-    df_features = df.copy()
-    df_features['theme_encoded'] = (
-        df_features['theme_label']
-        .map(fitted_theme_encoding['theme_encoded_by_theme'])
-        .fillna(fitted_theme_encoding['global_mean'])
-        .astype(float)
-    )
-
-    theme_dummies = pd.get_dummies(df_features['theme_label'], prefix='theme')
-    theme_dummies = theme_dummies.reindex(columns=known_theme_cols, fill_value=0)
-
-    base_features = [
-        'duration_sec', 'follower_count_log', 'publish_hour',
-        'avg_sentiment', 'visual_brightness', 'visual_saturation',
-        'cut_frequency', 'audio_bpm', 'theme_encoded'
-    ]
-    return pd.concat([df_features[base_features], theme_dummies], axis=1)
+    return shared_build_feature_matrix(df, fitted_theme_encoding, known_theme_cols)
 
 def add_derived_features(df):
-    # 衍生特征基于已编码/已清洗的数值特征生成，不再参与拟合主题统计
-    df_features = df.copy()
-    df_features.loc[:, 'visual_impact'] = (df_features['visual_brightness'] * df_features['visual_saturation']) / 1000.0
-    df_features.loc[:, 'sensory_pace'] = df_features['audio_bpm'] * df_features['cut_frequency']
-    df_features.loc[:, 'sentiment_intensity'] = abs(df_features['avg_sentiment'] - 0.5) * 2
-    df_features.loc[:, 'audio_visual_energy'] = df_features['visual_brightness'] * df_features['audio_bpm'] / 1000.0
-    df_features.loc[:, 'content_density'] = df_features['cut_frequency'] / (df_features['duration_sec'] + 1)
-    return df_features
+    return shared_add_derived_features(df)
 
 def build_preprocessing_spec(version_id, feature_names_in, known_theme_cols,
                              fitted_theme_encoding, numeric_imputation_values,
                              follower_clip_upper):
-    # 版本级预处理真相：供后续推理侧切换到 version-owned preprocessing metadata
-    theme_statistics = {}
-    for theme_name, count in fitted_theme_encoding['theme_count_by_theme'].items():
-        theme_statistics[str(theme_name)] = {
-            'count': int(count),
-            'local_mean_log': float(fitted_theme_encoding['theme_local_mean_by_theme'][theme_name])
-        }
-
-    return {
-        'derivation_version': 'train_master_arena_prep_v1',
-        'version_id': version_id,
-        'created_at': datetime.datetime.now().isoformat(),
-        'producer': 'ml_pipeline.train_master_arena',
-        'expected_consumer_mode': 'version_owned_preprocessing_metadata',
-        'bayesian_global_mean': float(fitted_theme_encoding['global_mean']),
-        'feature_names_in': [str(col) for col in feature_names_in],
-        'known_theme_cols': [str(col) for col in known_theme_cols],
-        'theme_encoding': {
-            'encoding_type': 'smoothed_theme_target_mean_log1p',
-            'target_space': 'log1p_digg_count',
-            'unseen_theme_fallback': 'bayesian_global_mean',
-            'smoothing_weight': float(fitted_theme_encoding['smoothing_weight']),
-            'theme_statistics': theme_statistics
-        },
-        'numeric_preprocessing': {
-            'follower_count_log_clip_upper': float(follower_clip_upper),
-            'numeric_imputation_values': {
-                str(col): float(value) for col, value in numeric_imputation_values.items()
-            }
-        }
-    }
+    return shared_build_preprocessing_spec(
+        version_id=version_id,
+        feature_names_in=feature_names_in,
+        known_theme_cols=known_theme_cols,
+        fitted_theme_encoding=fitted_theme_encoding,
+        numeric_imputation_values=numeric_imputation_values,
+        follower_clip_upper=follower_clip_upper,
+        producer='ml_pipeline.train_master_arena',
+    )
 
 def apply_numeric_preprocessing(df, follower_clip_upper, numeric_imputation_values):
-    # 数值型拟合步骤必须只使用训练侧拟合值，对验证/测试侧仅做应用
-    df_processed = df.copy()
-    df_processed.loc[:, 'follower_count_log'] = df_processed['follower_count_log'].clip(upper=follower_clip_upper)
-    for col, impute_value in numeric_imputation_values.items():
-        df_processed.loc[:, col] = df_processed[col].fillna(impute_value)
-    return df_processed
+    return shared_apply_numeric_preprocessing(df, follower_clip_upper, numeric_imputation_values)
 
 def fit_preprocessing_context(train_df):
     # 训练侧拟合预处理真相：供 fold-local CV、selection validation、final showdown 共用
@@ -251,19 +223,7 @@ def fit_preprocessing_context(train_df):
     }
 
 def transform_with_preprocessing_context(df, preprocessing_context):
-    # 仅应用训练侧已拟合的预处理上下文，不在验证/测试数据上重新拟合
-    X = build_feature_matrix(
-        df,
-        preprocessing_context['fitted_theme_encoding'],
-        preprocessing_context['known_theme_cols']
-    )
-    X = apply_numeric_preprocessing(
-        X,
-        preprocessing_context['follower_clip_upper'],
-        preprocessing_context['numeric_imputation_values']
-    )
-    X = add_derived_features(X)
-    return X[preprocessing_context['feature_cols']]
+    return shared_transform_with_preprocessing_context(df, preprocessing_context)
 
 def prepare_model_training_data(train_df, eval_df=None):
     # 为某一次训练职责（fold、selection、showdown）准备独立的预处理和缩放结果
@@ -329,31 +289,49 @@ def run_fold_local_cv(model_class, model_params, training_df):
     }
 
 def load_champion_metadata_and_artifacts():
-    # 加载卫冕冠军及其伸缩器
+    # 加载卫冕冠军及其版本拥有的预处理规格
     try:
         if not os.path.exists(manifest_path):
-            return None, None, None
+            return None, None, None, None
             
         with open(manifest_path, 'r', encoding='utf-8') as f:
             manifest = json.load(f)
             
         champion_id = manifest.get('current_version')
         if not champion_id:
-            return None, None, None
+            return None, None, None, None
             
-        model_file = os.path.join(artifacts_dir, f'model_{champion_id}.pkl')
-        scaler_file = os.path.join(artifacts_dir, f'scaler_{champion_id}.pkl')
+        bundle_artifacts = manifest.get('bundle_artifacts', {})
+        model_file = os.path.join(
+            artifacts_dir,
+            bundle_artifacts.get('model_file') or f'model_{champion_id}.pkl'
+        )
+        scaler_file = os.path.join(
+            artifacts_dir,
+            bundle_artifacts.get('scaler_file') or f'scaler_{champion_id}.pkl'
+        )
         
         if not os.path.exists(model_file) or not os.path.exists(scaler_file):
-            return None, None, None
+            return None, None, None, None
             
         champion_model = joblib.load(model_file)
         champion_scaler = joblib.load(scaler_file)
-        return manifest, champion_model, champion_scaler
+        champion_prep_spec = None
+        prep_path = resolve_prep_spec_path(artifacts_dir, champion_id, manifest_payload=manifest)
+        if prep_path.exists():
+            try:
+                with open(prep_path, 'r', encoding='utf-8') as f:
+                    champion_prep_spec = normalize_preprocessing_spec(
+                        json.load(f),
+                        version_id=champion_id
+                    )
+            except Exception as prep_error:
+                print(f"[WARN] Failed to load champion preprocessing spec for {champion_id}: {str(prep_error)}")
+        return manifest, champion_model, champion_scaler, champion_prep_spec
     except Exception as e:
         # 异常处理保证健壮性
         print(f"[ERROR] Failed to load champion: {str(e)}")
-        return None, None, None
+        return None, None, None, None
 
 def filter_rare_themes(df, min_samples):
     # 按主题标签分组，过滤掉样本数不足阈值的稀有主题
@@ -494,7 +472,15 @@ def deploy_new_champion(challenger_model, challenger_scaler, metadata):
             'best_model': metadata['best_model'],
             'test_rmse': metadata['test_rmse'],
             'test_r2': metadata['test_r2'],
-            'hyperparameters': metadata['hyperparameters']
+            'hyperparameters': metadata['hyperparameters'],
+            'bundle_mode': 'bundle_aware' if preprocessing_spec else 'legacy_compatibility',
+            'bundle_artifacts': {
+                'version_id': version_id,
+                'model_file': os.path.basename(new_model_path),
+                'scaler_file': os.path.basename(new_scaler_path),
+                'prep_spec_file': os.path.basename(new_prep_path) if preprocessing_spec else None,
+                'bundle_complete': bool(preprocessing_spec),
+            }
         }
 
         if 'feature_names_in' in metadata and metadata['feature_names_in']:
@@ -503,7 +489,11 @@ def deploy_new_champion(challenger_model, challenger_scaler, metadata):
             new_manifest['bayesian_global_mean'] = metadata['bayesian_global_mean']
         if preprocessing_spec:
             new_manifest['prep_spec_file'] = os.path.basename(new_prep_path)
+            new_manifest['bundle_complete'] = True
             new_manifest['preprocessing_derivation_version'] = preprocessing_spec.get('derivation_version')
+            new_manifest['preprocessing_schema_version'] = preprocessing_spec.get('schema_version')
+        else:
+            new_manifest['bundle_complete'] = False
         
         if 'feature_importances' in metadata and metadata['feature_importances']:
             new_manifest['feature_importances'] = metadata['feature_importances']
@@ -722,7 +712,7 @@ def build_master_arena():
 
     # ---------------- Step 2: Load the Champion ----------------
     print("\n========== STEP 2: LOAD THE CHAMPION (1 GATEKEEPER) ==========")
-    manifest, champion_model, champion_scaler = load_champion_metadata_and_artifacts()
+    manifest, champion_model, champion_scaler, champion_prep_spec = load_champion_metadata_and_artifacts()
 
     # ---------------- Step 3: The Showdown ----------------
     print("\n========== STEP 3: THE SHOWDOWN (FINAL TEST ONLY) ==========")
@@ -793,8 +783,8 @@ def build_master_arena():
 
         print("[VS] Evaluating Champion vs. Challenger on reserved final showdown test set...")
 
-        # 卫冕冠军必须使用其保存时的缩放器应对漂移
-        # 对齐特征列以防新增特征导致维度不匹配
+        # 卫冕冠军必须使用其版本拥有的预处理真值重建 showdown 特征；
+        # 绝不再复用 challenger-prepared X_eval。
         champ_expected_features = []
         if hasattr(champion_model, 'feature_names_in_'):
             champ_expected_features = champion_model.feature_names_in_
@@ -802,14 +792,14 @@ def build_master_arena():
             champ_expected_features = champion_scaler.feature_names_in_
         else:
             champ_expected_features = feature_cols
-            
-        # 如果维度缺失以零填充（向下兼容），如果有多出特征予以丢弃
-        X_test_champ = pd.DataFrame(index=final_training_bundle['X_eval'].index)
-        for col in champ_expected_features:
-            if col in final_training_bundle['X_eval'].columns:
-                X_test_champ[col] = final_training_bundle['X_eval'][col]
-            else:
-                X_test_champ[col] = 0.0
+
+        X_test_champ = build_versioned_evaluation_features(
+            eval_df=showdown_test_df,
+            expected_features=list(champ_expected_features),
+            scaler=champion_scaler,
+            prep_spec=champion_prep_spec,
+            manifest_payload=manifest
+        )
 
         X_test_scaled_champion = champion_scaler.transform(X_test_champ)
         champion_final_metrics = calculate_log_space_metrics(
