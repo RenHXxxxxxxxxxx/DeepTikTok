@@ -1,7 +1,9 @@
 # -- coding: utf-8 --
 """
 theme_baseline_engine.py
-# *主题基准统计引擎 - 纯统计学计算模块，不依赖机器学习模型*
+# *主题基准统计引擎 - 纯统计学 display/explanation 模块，不依赖机器学习模型*
+# *Strategy anchor (docs/ml_data_strategy.md): this module serves current-theme UI baselines only.*
+# *It is not the authoritative source for version-owned model-input preprocessing metadata.*
 """
 
 import numpy as np
@@ -86,7 +88,8 @@ def calculate_optimal_publishing_times(video_data_list: List[Dict[str, Any]], to
 class ThemeBaselineCalculator:
     """
     # *主题基准统计计算器*
-    # *用于计算视频点赞数的统计基准值*
+    # *用于计算视频点赞数的 display-layer 统计基准值*
+    # *边界说明：用于展示解释层的当前主题基准，不负责定义模型输入预处理真相*
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -129,7 +132,7 @@ class ThemeBaselineCalculator:
 
     def calculate(self, video_data_list: List[Dict[str, Any]], global_stats: Optional[Dict[str, Any]] = None, smoothing_factor: int = 10) -> Dict[str, Any]:
         """
-        # *计算主题基准统计值 (支持贝叶斯平滑)*
+        # *计算当前主题 display baseline (支持贝叶斯平滑)*
         
         # *Args:*
         #     *video_data_list: 包含视频数据的字典列表*
@@ -159,7 +162,7 @@ class ThemeBaselineCalculator:
             else:
                 local_stats = None
 
-            # Step 3: 贝叶斯平滑逻辑 (Bayesian Smoothing)
+            # Step 3: display-layer 贝叶斯平滑逻辑 (Bayesian Smoothing)
             # 公式: Smoothed = (N  Local + K  Global) / (N + K)
             
             if global_stats and isinstance(global_stats, dict):
@@ -218,7 +221,23 @@ def calculate_theme_stats(video_data_list: List[Dict[str, Any]],
                           config: Optional[Dict[str, Any]] = None,
                           global_stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    # *便捷函数：计算主题基准统计值 (支持传入全局基准)*
+    # *兼容旧命名：计算当前主题 display baseline (支持传入全局基准)*
+    # *Strategy anchor: callers should use this for current-theme display stats only.*
+    # *Do not treat this helper as model-input preprocessing truth.*
+    """
+    return calculate_display_theme_baseline(
+        video_data_list=video_data_list,
+        config=config,
+        global_stats=global_stats
+    )
+
+
+def calculate_display_theme_baseline(video_data_list: List[Dict[str, Any]],
+                                     config: Optional[Dict[str, Any]] = None,
+                                     global_stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    # *推荐入口：计算当前主题的 UI / explanation baseline*
+    # *调用方应将返回结果用于分位数展示、文案解释、发布时间建议等 display-layer 逻辑。*
     """
     calculator = ThemeBaselineCalculator(config=config)
     return calculator.calculate(video_data_list, global_stats=global_stats)

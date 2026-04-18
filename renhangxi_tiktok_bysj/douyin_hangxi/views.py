@@ -46,7 +46,7 @@ try:
     # [重构] 导入路径更新：predict_service 已迁移至 services/
     from services import predict_service
     # [重构] 主题基准统计引擎已迁移至 ml_pipeline/
-    from ml_pipeline.theme_baseline_engine import calculate_theme_stats
+    from ml_pipeline.theme_baseline_engine import calculate_display_theme_baseline
     # [重构] 统一持久化管理器已迁移至 services/
     from services.data_manager import UnifiedPersistenceManager
 except ImportError:
@@ -1141,6 +1141,47 @@ def predict_page(request):
     return render(request, 'prediction/dashboard.html', context)
 
 
+# 爆款预测 AI 服务辅助函数
+def _build_model_request_payload(hw: dict, follower_count: int, publish_hour: int, theme_name: str) -> dict:
+    """只构建模型输入请求体；不混入 display-layer 当前主题基准。"""
+    return {
+        'visual_brightness': hw.get('visual_brightness', 128),
+        'visual_saturation': hw.get('visual_saturation', 100),
+        'audio_bpm': hw.get('audio_bpm', 110),
+        'cut_frequency': hw.get('cut_frequency', 0.5),
+        'duration_sec': hw.get('duration_sec', 15),
+        'follower_count': follower_count,
+        'publish_hour': publish_hour,
+        'avg_sentiment': 0.5,
+        'collect_count': 0,
+        'comment_count': 0,
+        'share_count': 0,
+        'script_keywords': hw.get('script_keywords', []),
+        'theme_label': theme_name or 'Unknown'
+    }
+
+
+def _load_display_theme_baseline(theme_name: str):
+    """
+    获取当前主题的 display/explanation baseline。
+    该统计仅服务 UI 解释层，不是模型输入预处理真值。
+    """
+    if not theme_name:
+        return None, None
+
+    theme_videos = list(Video.objects.filter(theme_label=theme_name).values('digg_count'))
+
+    # Strategy anchor (docs/ml_data_strategy.md):
+    # display baseline belongs to current-theme explanation only.
+    # This request-time query path should later move to cached/precomputed UI stats.
+    global_videos = list(Video.objects.all().values('digg_count'))
+    global_display_baseline = calculate_display_theme_baseline(global_videos)
+    display_theme_baseline = calculate_display_theme_baseline(
+        theme_videos,
+        global_stats=global_display_baseline
+    )
+    return display_theme_baseline, display_theme_baseline.get('warning')
+
 # 爆款预测 AI 服务接口
 @login_required
 def predict_api(request):
@@ -1171,69 +1212,46 @@ def predict_api(request):
         try:
             analyzer = VideoContentAnalyzer(temp_path)
             hw = analyzer.run_full_analysis(include_script_keywords=True)
-    
-            # 构建特征数据字典
-            p_data = {
-                'visual_brightness': hw.get('visual_brightness', 128),
-                'visual_saturation': hw.get('visual_saturation', 100),
-                'audio_bpm': hw.get('audio_bpm', 110),
-                'cut_frequency': hw.get('cut_frequency', 0.5),
-                'duration_sec': hw.get('duration_sec', 15),
-                'follower_count': follower_count,
-                'publish_hour': publish_hour,
-                'avg_sentiment': 0.5,
-                'collect_count': 0,
-                'comment_count': 0,
-                'share_count': 0,
-                'script_keywords': hw.get('script_keywords', []),
-                # [NEW] 注入当前选择的主题供模型特征工程使用
-                'theme_label': request.POST.get('theme_name', 'Unknown')
-            }
-    
-            # === 核心逻辑增强：引入赛道基准对比 + 贝叶斯平滑 ===
-            # 1. 获取目标赛道数据
             theme_name = request.POST.get('theme_name')
-            theme_baseline = None
-            warning_msg = None
-            
-            if theme_name:
-                # 只查询点赞数，优化性能
-                theme_videos = list(Video.objects.filter(theme_label=theme_name).values('digg_count'))
-                
-                # [NEW] 获取全局数据用于贝叶斯平滑
-                # 为了性能，这里最好有缓存，暂且实时查询 (仅 digg_count)
-                global_videos = list(Video.objects.all().values('digg_count'))
-                # 计算全局基准
-                global_baseline = calculate_theme_stats(global_videos)
-                
-                # 2. 计算赛道基准 (传入全局基准以启用平滑)
-                theme_baseline = calculate_theme_stats(theme_videos, global_stats=global_baseline)
-                
-                if theme_baseline.get('warning'):
-                    warning_msg = theme_baseline['warning']
-            
-            # 3. 实例化预测服务并执行预测
+            model_request_payload = _build_model_request_payload(
+                hw=hw,
+                follower_count=follower_count,
+                publish_hour=publish_hour,
+                theme_name=theme_name
+            )
+
+            # 将模型预测与 display-layer 当前主题解释显式拆分，避免职责混淆。
+            display_theme_baseline, warning_msg = _load_display_theme_baseline(theme_name)
+
+            # 1. 实例化预测服务并执行预测
             # [Singleton] 获取进程级单例实例：若已初始化则直接返回内存中的对象，无欲盘 I/O 开销
             service = predict_service.DiggPredictionService()
-            # 传入 theme_baseline 以计算 quality_score 和 percentile_rank
-            result = service.predict_digg_count(p_data, theme_baseline=theme_baseline)
-            
-            # 解析预测结果
-            pred_likes = result.get('predicted_digg', 0)
-            quality_score = result.get('quality_score', 0)
-            percentile_rank = result.get('percentile_rank', '')
-            
+            prediction_result = service.predict_digg_count(
+                model_request_payload,
+                display_theme_baseline=display_theme_baseline
+            )
+
+            # 解析预测结果：
+            # `predicted_digg` / `predicted_likes` 在当前接口中表示 display-facing 展示值；
+            # 模型原始预测保留在服务内部语义中，不在 view 层直接消费。
+            display_predicted_likes = prediction_result.get('predicted_digg', 0)
+            quality_score = prediction_result.get('quality_score', 0)
+            percentile_rank = prediction_result.get('percentile_rank', '')
+
             # 调用大模型生成专家建议
             # 将质量分和排名信息注入给 LLM
             # [新增] 注入统计学引擎算出的推荐时间与分位数
-            theme_p25 = theme_baseline.get('p25', 0) if theme_baseline else 0
-            theme_p50 = theme_baseline.get('p50', 0) if theme_baseline else 0
-            theme_p75 = theme_baseline.get('p75', 0) if theme_baseline else 0
-            optimal_times = theme_baseline.get('optimal_publishing_times', ["18:00", "19:00", "20:00"]) if theme_baseline else ["18:00", "19:00", "20:00"]
-            
+            theme_p25 = display_theme_baseline.get('p25', 0) if display_theme_baseline else 0
+            theme_p50 = display_theme_baseline.get('p50', 0) if display_theme_baseline else 0
+            theme_p75 = display_theme_baseline.get('p75', 0) if display_theme_baseline else 0
+            optimal_times = (
+                display_theme_baseline.get('optimal_publishing_times', ["18:00", "19:00", "20:00"])
+                if display_theme_baseline else ["18:00", "19:00", "20:00"]
+            )
+
             advice_context = {
-                **p_data, 
-                'predicted_likes': pred_likes,
+                **model_request_payload,
+                'predicted_likes': display_predicted_likes,
                 'quality_score': quality_score,
                 'percentile_rank': percentile_rank,
                 'theme_name': theme_name or "通用赛道",
@@ -1269,12 +1287,12 @@ def predict_api(request):
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-        # 返回完整数据：预测值 + 评分 + 排名 + 基准信息
+        # 返回完整数据：这里的 predicted_likes 是最终展示值，不是原始模型输出。
         return JsonResponse({
-            'predicted_likes': f"{int(pred_likes):,}",
+            'predicted_likes': f"{int(display_predicted_likes):,}",
             'quality_score': quality_score,
             'percentile_rank': percentile_rank,
-            'baseline_info': theme_baseline,
+            'baseline_info': display_theme_baseline,
             'warning': warning_msg,
             'advice': advice,
             'status': 'success'

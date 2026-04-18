@@ -11,7 +11,7 @@ import numpy as np
 import joblib
 from pathlib import Path
 from django.db.models import Avg
-from sklearn.model_selection import train_test_split, ParameterGrid, cross_val_score
+from sklearn.model_selection import train_test_split, ParameterGrid, KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score, root_mean_squared_error, mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
@@ -44,9 +44,11 @@ from django.apps import apps
 # 全局配置项：避免魔法数字硬编码
 GLOBAL_CONFIG = {
     'test_size': 0.15,
+    'selection_validation_size': 0.17647058823529413,
     'random_state': 42,
     'min_theme_samples': 5,
     'target_ratio': 0.70,
+    'theme_encode_smoothing_weight': 10.0,
     'cap_quantile': 0.95,
     'cv_folds': 5,
     'n_jobs': 1,
@@ -93,6 +95,239 @@ def convert_duration_to_seconds(duration_str):
         # 异常处理保证健壮性
         return 0
 
+def prepare_base_training_dataframe(df):
+    # 只做与目标值无关的基础清洗与解析，允许在切分前执行
+    df_prepared = df.copy()
+    df_prepared['duration_sec'] = df_prepared['duration'].apply(convert_duration_to_seconds)
+    df_prepared['publish_hour'] = pd.to_datetime(df_prepared['create_time'], errors='coerce').dt.hour
+    df_prepared['follower_count_log'] = np.log1p(df_prepared['follower_count'])
+    return df_prepared
+
+def fit_train_owned_theme_encoding(train_df, smoothing_weight):
+    # 所有目标感知主题统计量必须只从训练集拟合
+    if train_df.empty:
+        raise ValueError("Training split is empty; cannot fit theme statistics.")
+
+    theme_fit_df = train_df[['theme_label', 'digg_count']].copy()
+    theme_fit_df['digg_count_log'] = np.log1p(theme_fit_df['digg_count'])
+    global_mean = theme_fit_df['digg_count_log'].mean()
+
+    theme_stats = theme_fit_df.groupby('theme_label')['digg_count_log'].agg(['count', 'mean']).reset_index()
+    theme_stats.rename(columns={'mean': 'local_mean'}, inplace=True)
+    theme_stats['theme_encoded'] = (
+        theme_stats['count'] * theme_stats['local_mean'] + smoothing_weight * global_mean
+    ) / (theme_stats['count'] + smoothing_weight)
+
+    return {
+        'global_mean': float(global_mean),
+        'smoothing_weight': float(smoothing_weight),
+        'theme_stats': theme_stats.copy(),
+        'theme_count_by_theme': theme_stats.set_index('theme_label')['count'].to_dict(),
+        'theme_local_mean_by_theme': theme_stats.set_index('theme_label')['local_mean'].to_dict(),
+        'theme_encoded_by_theme': theme_stats.set_index('theme_label')['theme_encoded'].to_dict()
+    }
+
+def build_feature_matrix(df, fitted_theme_encoding, known_theme_cols):
+    # 使用训练集拟合出的主题编码/主题空间来构建特征，保证持出集只做应用不反向影响拟合
+    df_features = df.copy()
+    df_features['theme_encoded'] = (
+        df_features['theme_label']
+        .map(fitted_theme_encoding['theme_encoded_by_theme'])
+        .fillna(fitted_theme_encoding['global_mean'])
+        .astype(float)
+    )
+
+    theme_dummies = pd.get_dummies(df_features['theme_label'], prefix='theme')
+    theme_dummies = theme_dummies.reindex(columns=known_theme_cols, fill_value=0)
+
+    base_features = [
+        'duration_sec', 'follower_count_log', 'publish_hour',
+        'avg_sentiment', 'visual_brightness', 'visual_saturation',
+        'cut_frequency', 'audio_bpm', 'theme_encoded'
+    ]
+    return pd.concat([df_features[base_features], theme_dummies], axis=1)
+
+def add_derived_features(df):
+    # 衍生特征基于已编码/已清洗的数值特征生成，不再参与拟合主题统计
+    df_features = df.copy()
+    df_features.loc[:, 'visual_impact'] = (df_features['visual_brightness'] * df_features['visual_saturation']) / 1000.0
+    df_features.loc[:, 'sensory_pace'] = df_features['audio_bpm'] * df_features['cut_frequency']
+    df_features.loc[:, 'sentiment_intensity'] = abs(df_features['avg_sentiment'] - 0.5) * 2
+    df_features.loc[:, 'audio_visual_energy'] = df_features['visual_brightness'] * df_features['audio_bpm'] / 1000.0
+    df_features.loc[:, 'content_density'] = df_features['cut_frequency'] / (df_features['duration_sec'] + 1)
+    return df_features
+
+def build_preprocessing_spec(version_id, feature_names_in, known_theme_cols,
+                             fitted_theme_encoding, numeric_imputation_values,
+                             follower_clip_upper):
+    # 版本级预处理真相：供后续推理侧切换到 version-owned preprocessing metadata
+    theme_statistics = {}
+    for theme_name, count in fitted_theme_encoding['theme_count_by_theme'].items():
+        theme_statistics[str(theme_name)] = {
+            'count': int(count),
+            'local_mean_log': float(fitted_theme_encoding['theme_local_mean_by_theme'][theme_name])
+        }
+
+    return {
+        'derivation_version': 'train_master_arena_prep_v1',
+        'version_id': version_id,
+        'created_at': datetime.datetime.now().isoformat(),
+        'producer': 'ml_pipeline.train_master_arena',
+        'expected_consumer_mode': 'version_owned_preprocessing_metadata',
+        'bayesian_global_mean': float(fitted_theme_encoding['global_mean']),
+        'feature_names_in': [str(col) for col in feature_names_in],
+        'known_theme_cols': [str(col) for col in known_theme_cols],
+        'theme_encoding': {
+            'encoding_type': 'smoothed_theme_target_mean_log1p',
+            'target_space': 'log1p_digg_count',
+            'unseen_theme_fallback': 'bayesian_global_mean',
+            'smoothing_weight': float(fitted_theme_encoding['smoothing_weight']),
+            'theme_statistics': theme_statistics
+        },
+        'numeric_preprocessing': {
+            'follower_count_log_clip_upper': float(follower_clip_upper),
+            'numeric_imputation_values': {
+                str(col): float(value) for col, value in numeric_imputation_values.items()
+            }
+        }
+    }
+
+def apply_numeric_preprocessing(df, follower_clip_upper, numeric_imputation_values):
+    # 数值型拟合步骤必须只使用训练侧拟合值，对验证/测试侧仅做应用
+    df_processed = df.copy()
+    df_processed.loc[:, 'follower_count_log'] = df_processed['follower_count_log'].clip(upper=follower_clip_upper)
+    for col, impute_value in numeric_imputation_values.items():
+        df_processed.loc[:, col] = df_processed[col].fillna(impute_value)
+    return df_processed
+
+def fit_preprocessing_context(train_df):
+    # 训练侧拟合预处理真相：供 fold-local CV、selection validation、final showdown 共用
+    fitted_theme_encoding = fit_train_owned_theme_encoding(
+        train_df,
+        GLOBAL_CONFIG['theme_encode_smoothing_weight']
+    )
+    known_theme_cols = pd.get_dummies(train_df['theme_label'], prefix='theme').columns.tolist()
+
+    X_train = build_feature_matrix(train_df, fitted_theme_encoding, known_theme_cols)
+    follower_clip_upper = X_train['follower_count_log'].quantile(0.99)
+    if pd.isna(follower_clip_upper):
+        follower_clip_upper = 0.0
+    follower_clip_upper = float(follower_clip_upper)
+
+    X_train = X_train.copy()
+    X_train.loc[:, 'follower_count_log'] = X_train['follower_count_log'].clip(upper=follower_clip_upper)
+
+    impute_cols = ['avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm']
+    numeric_imputation_values = {}
+    for col in impute_cols:
+        median_val = X_train[col].median()
+        if pd.isna(median_val):
+            median_val = GLOBAL_CONFIG['default_fallback'].get(col, 0)
+        median_val = float(median_val)
+        numeric_imputation_values[col] = median_val
+        X_train.loc[:, col] = X_train[col].fillna(median_val)
+
+    X_train = add_derived_features(X_train)
+    feature_cols = [
+        'duration_sec', 'follower_count_log', 'publish_hour',
+        'avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm',
+        'theme_encoded',
+        'visual_impact', 'sensory_pace', 'sentiment_intensity', 'audio_visual_energy', 'content_density'
+    ] + known_theme_cols
+    X_train = X_train[feature_cols]
+
+    target_cap_value = pd.Series(train_df['digg_count'].values).quantile(GLOBAL_CONFIG['cap_quantile'])
+    if pd.isna(target_cap_value):
+        target_cap_value = 0.0
+
+    return {
+        'fitted_theme_encoding': fitted_theme_encoding,
+        'known_theme_cols': known_theme_cols,
+        'numeric_imputation_values': numeric_imputation_values,
+        'follower_clip_upper': follower_clip_upper,
+        'feature_cols': feature_cols,
+        'target_cap_value': float(target_cap_value),
+        'X_train_preprocessed': X_train.copy()
+    }
+
+def transform_with_preprocessing_context(df, preprocessing_context):
+    # 仅应用训练侧已拟合的预处理上下文，不在验证/测试数据上重新拟合
+    X = build_feature_matrix(
+        df,
+        preprocessing_context['fitted_theme_encoding'],
+        preprocessing_context['known_theme_cols']
+    )
+    X = apply_numeric_preprocessing(
+        X,
+        preprocessing_context['follower_clip_upper'],
+        preprocessing_context['numeric_imputation_values']
+    )
+    X = add_derived_features(X)
+    return X[preprocessing_context['feature_cols']]
+
+def prepare_model_training_data(train_df, eval_df=None):
+    # 为某一次训练职责（fold、selection、showdown）准备独立的预处理和缩放结果
+    preprocessing_context = fit_preprocessing_context(train_df)
+    X_train = preprocessing_context['X_train_preprocessed'].copy()
+    y_train_orig_pre = train_df['digg_count'].values
+    y_train_orig = np.clip(y_train_orig_pre, 0, preprocessing_context['target_cap_value'])
+    y_train = np.log1p(y_train_orig)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
+    bundle = {
+        'preprocessing_context': preprocessing_context,
+        'scaler': scaler,
+        'X_train': X_train,
+        'X_train_scaled': X_train_scaled,
+        'y_train_orig': y_train_orig,
+        'y_train': y_train
+    }
+
+    if eval_df is not None:
+        X_eval = transform_with_preprocessing_context(eval_df, preprocessing_context)
+        bundle['X_eval'] = X_eval
+        bundle['X_eval_scaled'] = scaler.transform(X_eval)
+        bundle['y_eval_orig'] = eval_df['digg_count'].values
+
+    return bundle
+
+def calculate_log_space_metrics(y_true_orig, y_pred_log):
+    # 统一在对数空间比较验证与最终 showdown，保证指标口径一致
+    clipped_pred_log = np.clip(y_pred_log, 0, GLOBAL_CONFIG['clip_max'])
+    y_true_log = np.log1p(y_true_orig)
+    return {
+        'RMSE': float(root_mean_squared_error(y_true_log, clipped_pred_log)),
+        'R2': float(r2_score(y_true_log, clipped_pred_log)),
+        'MAE': float(mean_absolute_error(y_true_log, clipped_pred_log))
+    }
+
+def run_fold_local_cv(model_class, model_params, training_df):
+    # fold-local CV：每个 fold 都重新拟合主题编码、数值拟合与缩放，杜绝全块预处理泄露
+    n_splits = min(GLOBAL_CONFIG['cv_folds'], len(training_df))
+    if n_splits < 2:
+        raise ValueError("Not enough samples for fold-local CV.")
+
+    cv = KFold(n_splits=n_splits, shuffle=True, random_state=GLOBAL_CONFIG['random_state'])
+    fold_metrics = []
+
+    for fold_train_idx, fold_val_idx in cv.split(training_df):
+        fold_train_df = training_df.iloc[fold_train_idx].copy()
+        fold_val_df = training_df.iloc[fold_val_idx].copy()
+
+        fold_bundle = prepare_model_training_data(fold_train_df, fold_val_df)
+        fold_model = model_class(**model_params)
+        fold_model.fit(fold_bundle['X_train_scaled'], fold_bundle['y_train'])
+        fold_preds_log = fold_model.predict(fold_bundle['X_eval_scaled'])
+        fold_metrics.append(calculate_log_space_metrics(fold_bundle['y_eval_orig'], fold_preds_log))
+
+    return {
+        'RMSE': float(np.mean([m['RMSE'] for m in fold_metrics])),
+        'R2': float(np.mean([m['R2'] for m in fold_metrics])),
+        'MAE': float(np.mean([m['MAE'] for m in fold_metrics]))
+    }
+
 def load_champion_metadata_and_artifacts():
     # 加载卫冕冠军及其伸缩器
     try:
@@ -122,6 +357,8 @@ def load_champion_metadata_and_artifacts():
 
 def filter_rare_themes(df, min_samples):
     # 按主题标签分组，过滤掉样本数不足阈值的稀有主题
+    # Strategy anchor (docs/ml_data_strategy.md):
+    # training continues to learn from all valid themes; this is data hygiene, not current-theme-only training.
     try:
         theme_counts = df['theme_label'].value_counts()
         rare_themes = theme_counts[theme_counts < min_samples]
@@ -150,6 +387,7 @@ def identify_active_theme(df):
 
 def build_target_foil_dataset(df, active_theme, target_ratio, random_state):
     # 构建"目标与陪衬"偏置采样数据集
+    # Strategy anchor: active_theme may bias sampling focus, but non-current themes remain part of the training distribution.
     try:
         df_target = df[df['theme_label'] == active_theme].copy()
         df_foil = df[df['theme_label'] != active_theme].copy()
@@ -184,7 +422,8 @@ def build_target_foil_dataset(df, active_theme, target_ratio, random_state):
         return df, n_t, n_f
 
 def print_statistics_panel(total_valid, active_theme, target_count, foil_count,
-                           train_size, test_size, dropped_themes):
+                           inner_train_size, selection_valid_size, showdown_test_size,
+                           dropped_themes):
     # 渲染训练前数据统计面板
     w = 62
     border = '╔' + '═' * w + '╗'
@@ -204,8 +443,9 @@ def print_statistics_panel(total_valid, active_theme, target_count, foil_count,
         row(f'  Foil Themes Count (sampled)     : {foil_count}'),
         row(f'    Biased Dataset Total            : {target_count + foil_count}'),
         mid_sep,
-        row(f'Training Set                       : {train_size}'),
-        row(f'Hold-out Set                       : {test_size}'),
+        row(f'Inner Training Set                 : {inner_train_size}'),
+        row(f'Selection Validation Set          : {selection_valid_size}'),
+        row(f'Final Showdown Test Set           : {showdown_test_size}'),
     ]
 
     if dropped_themes:
@@ -225,11 +465,18 @@ def deploy_new_champion(challenger_model, challenger_scaler, metadata):
         
         new_model_path = os.path.join(artifacts_dir, f'model_{version_id}.pkl')
         new_scaler_path = os.path.join(artifacts_dir, f'scaler_{version_id}.pkl')
-        
-        joblib.dump(challenger_model, new_model_path)
-        joblib.dump(challenger_scaler, new_scaler_path)
-        
+        new_prep_path = os.path.join(artifacts_dir, f'prep_{version_id}.json')
+        temp_model_path = os.path.join(artifacts_dir, f'model_{version_id}.tmp.pkl')
+        temp_scaler_path = os.path.join(artifacts_dir, f'scaler_{version_id}.tmp.pkl')
+        temp_prep_path = os.path.join(artifacts_dir, f'prep_{version_id}.tmp.json')
         temp_manifest = os.path.join(artifacts_dir, 'version_manifest_tmp.json')
+        preprocessing_spec = metadata.get('preprocessing_spec')
+
+        joblib.dump(challenger_model, temp_model_path)
+        joblib.dump(challenger_scaler, temp_scaler_path)
+        if preprocessing_spec:
+            with open(temp_prep_path, 'w', encoding='utf-8') as f:
+                json.dump(preprocessing_spec, f, indent=4, ensure_ascii=False)
         
         prev_version = None
         if os.path.exists(manifest_path):
@@ -254,16 +501,31 @@ def deploy_new_champion(challenger_model, challenger_scaler, metadata):
             new_manifest['feature_names_in'] = metadata['feature_names_in']
         if 'bayesian_global_mean' in metadata:
             new_manifest['bayesian_global_mean'] = metadata['bayesian_global_mean']
+        if preprocessing_spec:
+            new_manifest['prep_spec_file'] = os.path.basename(new_prep_path)
+            new_manifest['preprocessing_derivation_version'] = preprocessing_spec.get('derivation_version')
         
         if 'feature_importances' in metadata and metadata['feature_importances']:
             new_manifest['feature_importances'] = metadata['feature_importances']
         
         with open(temp_manifest, 'w', encoding='utf-8') as f:
             json.dump(new_manifest, f, indent=4)
+
+        shutil.move(temp_model_path, new_model_path)
+        shutil.move(temp_scaler_path, new_scaler_path)
+        if preprocessing_spec:
+            shutil.move(temp_prep_path, new_prep_path)
+            print(
+                f" [DEPLOY] Persisted preprocessing spec for version '{version_id}': "
+                f"{os.path.basename(new_prep_path)} (future consumers should use version-owned preprocessing metadata)."
+            )
             
         # 原子替换
         shutil.move(temp_manifest, manifest_path)
-        print(f" [DEPLOY] New Champion '{metadata['best_model']}' (v: {version_id}) successfully deployed.")
+        print(
+            f" [DEPLOY] New Champion '{metadata['best_model']}' (v: {version_id}) successfully deployed "
+            f"with model/scaler{'/prep spec' if preprocessing_spec else ''} artifacts."
+        )
         
     except Exception as e:
         # 异常处理保证健壮性
@@ -300,7 +562,7 @@ def build_master_arena():
     print(f"[INFO] Raw samples loaded: {len(df)}")
 
     try:
-        # 第〇步：稀有主题过滤 —— 清除样本量不足的噪声主题
+        # Stage 1: raw cleaning / parsing
         df['theme_label'] = df['theme_label'].fillna('Unknown')
         df, dropped_themes = filter_rare_themes(df, GLOBAL_CONFIG['min_theme_samples'])
         total_valid = len(df)
@@ -313,116 +575,46 @@ def build_master_arena():
         df_biased = df.copy()
         target_count = len(df_biased[df_biased['theme_label'] == active_theme])
         foil_count = len(df_biased) - target_count
+        df_prepared = prepare_base_training_dataframe(df_biased)
 
-        # 基础特征工程（在偏置数据集上执行）
-        df_biased['duration_sec'] = df_biased['duration'].apply(convert_duration_to_seconds)
-        df_biased['publish_hour'] = pd.to_datetime(df_biased['create_time']).dt.hour
-
-        # 对长尾偏态特征(粉丝数)进行对数变换，稳定梯度
-        df_biased['follower_count_log'] = np.log1p(df_biased['follower_count'])
-
-        # 核心：贝叶斯目标编码 (Bayesian Target Encoding) 替代独热编码
-        df_biased['temp_digg_log'] = np.log1p(df_biased['digg_count'])
-        global_mean = df_biased['temp_digg_log'].mean()
-        weight = 10.0 # 平滑系数
-
-        theme_stats = df_biased.groupby('theme_label')['temp_digg_log'].agg(['count', 'mean']).reset_index()
-        theme_stats.rename(columns={'mean': 'local_mean'}, inplace=True)
-        theme_stats['theme_encoded'] = (theme_stats['count'] * theme_stats['local_mean'] + weight * global_mean) / (theme_stats['count'] + weight)
-
-        df_biased = df_biased.merge(theme_stats[['theme_label', 'theme_encoded']], on='theme_label', how='left')
-        df_biased.drop(columns=['temp_digg_log'], inplace=True)
-
-        # 恢复动态多维特征空间（独热编码矩阵）
-        theme_dummies = pd.get_dummies(df_biased['theme_label'], prefix='theme')
-        known_theme_cols = theme_dummies.columns.tolist()
-        df_biased = pd.concat([df_biased, theme_dummies], axis=1)
-
-        # 聚合所有基础特征，保留动态扩充的主题多维空间
-        base_features = [
-            'duration_sec', 'follower_count_log', 'publish_hour',
-            'avg_sentiment', 'visual_brightness', 'visual_saturation',
-            'cut_frequency', 'audio_bpm', 'theme_encoded'
-        ] + known_theme_cols
-
-        X = df_biased[base_features].copy()
-        y_original = df_biased['digg_count'].values
-
-        # 在任何特征计算、截断、缺失值处理之前先拆分数据集，杜绝数据泄露
-        X_train, X_test, y_train_orig_pre, y_test_orig = train_test_split(
-            X, y_original, test_size=GLOBAL_CONFIG['test_size'], random_state=GLOBAL_CONFIG['random_state']
+        # Stage 2: outer split for final showdown; inner split for challenger selection
+        development_df, showdown_test_df = train_test_split(
+            df_prepared, test_size=GLOBAL_CONFIG['test_size'], random_state=GLOBAL_CONFIG['random_state']
         )
+        development_df = development_df.reset_index(drop=True)
+        showdown_test_df = showdown_test_df.reset_index(drop=True)
 
-        # 第三步：渲染统计面板
+        selection_train_df, selection_valid_df = train_test_split(
+            development_df,
+            test_size=GLOBAL_CONFIG['selection_validation_size'],
+            random_state=GLOBAL_CONFIG['random_state']
+        )
+        selection_train_df = selection_train_df.reset_index(drop=True)
+        selection_valid_df = selection_valid_df.reset_index(drop=True)
+        development_df = pd.concat([selection_train_df, selection_valid_df], ignore_index=True)
+
+        # 渲染统计面板
         print_statistics_panel(
             total_valid=total_valid,
             active_theme=active_theme,
             target_count=target_count,
             foil_count=foil_count,
-            train_size=len(X_train),
-            test_size=len(X_test),
+            inner_train_size=len(selection_train_df),
+            selection_valid_size=len(selection_valid_df),
+            showdown_test_size=len(showdown_test_df),
             dropped_themes=dropped_themes
         )
-        
-        # 拷贝以防止视图修改警告
-        X_train = X_train.copy()
-        X_test = X_test.copy()
-
-        # 仅在训练集上计算粉丝对数特征P99并同步截断训练/测试集，避免长尾畸变与泄露
-        p99_follower = X_train['follower_count_log'].quantile(0.99)
-        X_train.loc[:, 'follower_count_log'] = X_train['follower_count_log'].clip(upper=p99_follower)
-        X_test.loc[:, 'follower_count_log'] = X_test['follower_count_log'].clip(upper=p99_follower)
-
-        # 仅在训练集上计算阈值并应用截断，防止目标变量泄露
-        cap_value = pd.Series(y_train_orig_pre).quantile(GLOBAL_CONFIG['cap_quantile'])
-        y_train_orig = np.clip(y_train_orig_pre, 0, cap_value)
-
-        y_train = np.log1p(y_train_orig)
-        # 保持y_test_orig为原始对决基准
-        
-        # 仅在训练集上计算中位数并在训练和测试集进行插补，防止特征泄露
-        impute_cols = ['avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm']
-        for col in impute_cols:
-            median_val = X_train[col].median()
-            if pd.isna(median_val):
-                # 兜底保护
-                median_val = GLOBAL_CONFIG['default_fallback'].get(col, 0)
-            X_train.loc[:, col] = X_train[col].fillna(median_val)
-            X_test.loc[:, col] = X_test[col].fillna(median_val)
-
-        # 衍生特征生成，分别在训练与测试集上独立执行确保无泄露
-        for ds in [X_train, X_test]:
-            ds.loc[:, 'visual_impact'] = (ds['visual_brightness'] * ds['visual_saturation']) / 1000.0
-            ds.loc[:, 'sensory_pace'] = ds['audio_bpm'] * ds['cut_frequency']
-            ds.loc[:, 'sentiment_intensity'] = abs(ds['avg_sentiment'] - 0.5) * 2
-            ds.loc[:, 'audio_visual_energy'] = ds['visual_brightness'] * ds['audio_bpm'] / 1000.0
-            ds.loc[:, 'content_density'] = ds['cut_frequency'] / (ds['duration_sec'] + 1)
-
-        # ================ 修复点：对齐最新的高阶特征，保留动态多维矩阵 ================
-        feature_cols = [
-            'duration_sec', 'follower_count_log', 'publish_hour',
-            'avg_sentiment', 'visual_brightness', 'visual_saturation', 'cut_frequency', 'audio_bpm',
-            'theme_encoded',
-            'visual_impact', 'sensory_pace', 'sentiment_intensity', 'audio_visual_energy', 'content_density'
-        ] + known_theme_cols
-        # =========================================================
-
-        X_train = X_train[feature_cols]
-        X_test = X_test[feature_cols]
-
-        print(f"[INFO] Final feature dimension: {len(feature_cols)}")
-
-        # 全新预处理器拟合
-        new_scaler = StandardScaler()
-        X_train_scaled = new_scaler.fit_transform(X_train)
+        print("[INFO] Challenger selection uses fold-local CV on the inner training block plus a separate validation split.")
+        print("[INFO] Final showdown is reserved for the untouched outer test split only.")
 
     except Exception as e:
         # 捕获数据预处理及切割过程中的异常
         print(f"[ERROR] Data preprocessing failed: {str(e)}")
         return
 
-    # ---------------- Step 1: Internal Selection ----------------
-    print("\n========== STEP 1: INTERNAL SELECTION (THE 3 CANDIDATES) ==========")
+    # ---------------- Step 1: Challenger Selection ----------------
+    print("\n========== STEP 1: CHALLENGER SELECTION (FOLD-LOCAL CV + CLEAN VALIDATION) ==========")
+    print("[INFO] Fold-local CV fits preprocessing inside each fold. Selection validation stays outside CV and outside the final showdown test.")
     
     models_to_train = {
         'RandomForest': {
@@ -450,76 +642,102 @@ def build_master_arena():
     }
 
     internal_leaderboard = []
-    trained_estimators = {}
+    model_selection_results = {}
+
+    try:
+        selection_bundle = prepare_model_training_data(selection_train_df, selection_valid_df)
+        print(f"[INFO] Challenger-selection feature dimension: {len(selection_bundle['preprocessing_context']['feature_cols'])}")
+    except Exception as e:
+        print(f"[ERROR] Challenger-selection preprocessing failed: {str(e)}")
+        return
 
     for model_name, config in models_to_train.items():
         print(f"[Training] {model_name}...")
         try:
             param_grid = GLOBAL_CONFIG['param_grids'].get(model_name, {})
             param_list = list(ParameterGrid(param_grid))
-            
-            best_score = -float('inf')
+
+            best_cv_metrics = None
             best_params = None
+            best_cv_rmse = float('inf')
 
             for params in param_list:
                 combined_params = {**config['fixed_params'], **params}
-                temp_model = config['class'](**combined_params)
-                
-                scores = cross_val_score(temp_model, X_train_scaled, y_train,
-                                         cv=GLOBAL_CONFIG['cv_folds'], scoring='r2',
-                                         n_jobs=GLOBAL_CONFIG['n_jobs'])
-                if scores.mean() > best_score:
-                    best_score = scores.mean()
+                cv_metrics = run_fold_local_cv(config['class'], combined_params, selection_train_df)
+                if cv_metrics['RMSE'] < best_cv_rmse:
+                    best_cv_rmse = cv_metrics['RMSE']
+                    best_cv_metrics = cv_metrics
                     best_params = params
 
-            # 最佳模型再训练
+            if best_params is None:
+                raise ValueError("No valid hyperparameter configuration was selected.")
+
             final_params = {**config['fixed_params'], **best_params}
-            final_model = config['class'](**final_params)
-            final_model.fit(X_train_scaled, y_train)
+            selection_model = config['class'](**final_params)
+            selection_model.fit(selection_bundle['X_train_scaled'], selection_bundle['y_train'])
 
-            # 为防止偏好单一CV，采用验证集快速初评（本集也已经缩放）
-            X_test_scaled_new = new_scaler.transform(X_test)
-            y_pred_log = final_model.predict(X_test_scaled_new)
-            y_pred_log = np.clip(y_pred_log, 0, GLOBAL_CONFIG['clip_max'])
-            # 核心修复：在对数空间进行评估，避免长尾指数爆炸
-            y_test_log = np.log1p(y_test_orig)
-            test_rmse = root_mean_squared_error(y_test_log, y_pred_log)
-            test_r2 = r2_score(y_test_log, y_pred_log)
-            test_mae = mean_absolute_error(y_test_log, y_pred_log)
+            validation_metrics = calculate_log_space_metrics(
+                selection_bundle['y_eval_orig'],
+                selection_model.predict(selection_bundle['X_eval_scaled'])
+            )
 
-            trained_estimators[model_name] = {
-                'model': final_model,
-                'params': final_params
+            model_selection_results[model_name] = {
+                'params': final_params,
+                'cv_metrics': best_cv_metrics,
+                'validation_metrics': validation_metrics
             }
             internal_leaderboard.append({
                 'Model': model_name,
-                'RMSE': test_rmse,
-                'R2': test_r2,
-                'MAE': test_mae
+                'CV_RMSE': best_cv_metrics['RMSE'],
+                'CV_R2': best_cv_metrics['R2'],
+                'CV_MAE': best_cv_metrics['MAE'],
+                'Validation_RMSE': validation_metrics['RMSE'],
+                'Validation_R2': validation_metrics['R2'],
+                'Validation_MAE': validation_metrics['MAE']
             })
-            print(f" -> RMSE: {test_rmse:.4f} | MAE: {test_mae:.4f} | R2: {test_r2:.4f}")
+            print(
+                f" -> CV RMSE: {best_cv_metrics['RMSE']:.4f} | "
+                f"Validation RMSE: {validation_metrics['RMSE']:.4f} | "
+                f"Validation MAE: {validation_metrics['MAE']:.4f} | "
+                f"Validation R2: {validation_metrics['R2']:.4f}"
+            )
 
         except Exception as e:
             # 异常处理允许个别失败但不整体崩溃
-            print(f"[ERROR] {model_name} internal validation failed: {str(e)}")
+            print(f"[ERROR] {model_name} challenger selection failed: {str(e)}")
 
     if not internal_leaderboard:
         print("[ERROR] Internal selection failed to produce any models.")
         return
 
-    internal_leaderboard.sort(key=lambda x: x['RMSE'])
+    internal_leaderboard.sort(key=lambda x: x['Validation_RMSE'])
     challenger_name = internal_leaderboard[0]['Model']
     challenger_stats = internal_leaderboard[0]
-    challenger_model = trained_estimators[challenger_name]['model']
+    challenger_params = model_selection_results[challenger_name]['params']
 
-    print(f"\n[WINNER] The Challenger is {challenger_name} (RMSE: {challenger_stats['RMSE']:.4f})")
+    print(
+        f"\n[WINNER] The Challenger is {challenger_name} "
+        f"(selection validation RMSE: {challenger_stats['Validation_RMSE']:.4f})"
+    )
 
     # ---------------- Step 2: Load the Champion ----------------
     print("\n========== STEP 2: LOAD THE CHAMPION (1 GATEKEEPER) ==========")
     manifest, champion_model, champion_scaler = load_champion_metadata_and_artifacts()
 
     # ---------------- Step 3: The Showdown ----------------
-    print("\n========== STEP 3: THE SHOWDOWN ==========")
+    print("\n========== STEP 3: THE SHOWDOWN (FINAL TEST ONLY) ==========")
+    print("[INFO] Final showdown trains the selected challenger on development data and evaluates only on the reserved outer test split.")
+
+    try:
+        final_training_bundle = prepare_model_training_data(development_df, showdown_test_df)
+        feature_cols = final_training_bundle['preprocessing_context']['feature_cols']
+        print(f"[INFO] Final feature dimension: {len(feature_cols)}")
+    except Exception as e:
+        print(f"[ERROR] Final showdown preprocessing failed: {str(e)}")
+        return
+
+    challenger_model = models_to_train[challenger_name]['class'](**challenger_params)
+    challenger_model.fit(final_training_bundle['X_train_scaled'], final_training_bundle['y_train'])
 
     # 提取重要特征用于保存
     feat_importances = {}
@@ -535,30 +753,45 @@ def build_master_arena():
     challenger_metadata = {
         'version_id': version_id,
         'best_model': challenger_name,
-        'test_rmse': challenger_stats['RMSE'],
-        'test_r2': challenger_stats['R2'],
-        'hyperparameters': trained_estimators[challenger_name]['params'],
+        'test_rmse': challenger_stats['Validation_RMSE'],
+        'test_r2': challenger_stats['Validation_R2'],
+        'hyperparameters': challenger_params,
         'feature_importances': feat_importances
     }
-    challenger_metadata['feature_names_in'] = list(X_train.columns)
-    challenger_metadata['bayesian_global_mean'] = float(global_mean)
+    challenger_metadata['feature_names_in'] = list(final_training_bundle['X_train'].columns)
+    challenger_metadata['bayesian_global_mean'] = float(
+        final_training_bundle['preprocessing_context']['fitted_theme_encoding']['global_mean']
+    )
+    challenger_metadata['preprocessing_spec'] = build_preprocessing_spec(
+        version_id=version_id,
+        feature_names_in=list(final_training_bundle['X_train'].columns),
+        known_theme_cols=final_training_bundle['preprocessing_context']['known_theme_cols'],
+        fitted_theme_encoding=final_training_bundle['preprocessing_context']['fitted_theme_encoding'],
+        numeric_imputation_values=final_training_bundle['preprocessing_context']['numeric_imputation_values'],
+        follower_clip_upper=final_training_bundle['preprocessing_context']['follower_clip_upper']
+    )
 
-    if not champion_model or not champion_scaler:
-        print("[INFO] No existing champion found. Graceful Fallback -> Promoting Challenger to Champion.")
-        deploy_new_champion(challenger_model, new_scaler, challenger_metadata)
-        return
-
-    print("[VS] Evaluating Champion vs. Challenger on global Hold-out...")
-    
     # 数学公平性：使用各自的数据缩放器，禁止使用同一套防止漂移误差
     try:
-        # 挑战者使用新拟合的缩放器
-        X_test_scaled_challenger = new_scaler.transform(X_test)
-        challenger_preds_log = challenger_model.predict(X_test_scaled_challenger)
-        challenger_preds_log = np.clip(challenger_preds_log, 0, GLOBAL_CONFIG['clip_max'])
-        challenger_preds = np.expm1(challenger_preds_log)
-        challenger_final_rmse = root_mean_squared_error(np.log1p(y_test_orig), challenger_preds_log)
-        challenger_final_mae = mean_absolute_error(np.log1p(y_test_orig), challenger_preds_log)
+        # 挑战者使用在 development data 上重新拟合出的预处理器，并仅在 final showdown test 上评估
+        challenger_final_metrics = calculate_log_space_metrics(
+            final_training_bundle['y_eval_orig'],
+            challenger_model.predict(final_training_bundle['X_eval_scaled'])
+        )
+        print(
+            f" -> Challenger ({challenger_name}) RMSE: {challenger_final_metrics['RMSE']:.4f} | "
+            f"MAE: {challenger_final_metrics['MAE']:.4f} | R2: {challenger_final_metrics['R2']:.4f}"
+        )
+
+        if not champion_model or not champion_scaler:
+            print("[INFO] No existing champion found. Promoting Challenger after clean final-test evaluation.")
+            challenger_metadata['test_rmse'] = challenger_final_metrics['RMSE']
+            challenger_metadata['test_r2'] = challenger_final_metrics['R2']
+            challenger_metadata['test_mae'] = challenger_final_metrics['MAE']
+            deploy_new_champion(challenger_model, final_training_bundle['scaler'], challenger_metadata)
+            return
+
+        print("[VS] Evaluating Champion vs. Challenger on reserved final showdown test set...")
 
         # 卫冕冠军必须使用其保存时的缩放器应对漂移
         # 对齐特征列以防新增特征导致维度不匹配
@@ -571,19 +804,18 @@ def build_master_arena():
             champ_expected_features = feature_cols
             
         # 如果维度缺失以零填充（向下兼容），如果有多出特征予以丢弃
-        X_test_champ = pd.DataFrame(index=X_test.index)
+        X_test_champ = pd.DataFrame(index=final_training_bundle['X_eval'].index)
         for col in champ_expected_features:
-            if col in X_test.columns:
-                X_test_champ[col] = X_test[col]
+            if col in final_training_bundle['X_eval'].columns:
+                X_test_champ[col] = final_training_bundle['X_eval'][col]
             else:
                 X_test_champ[col] = 0.0
 
         X_test_scaled_champion = champion_scaler.transform(X_test_champ)
-        champion_preds_log = champion_model.predict(X_test_scaled_champion)
-        champion_preds_log = np.clip(champion_preds_log, 0, GLOBAL_CONFIG['clip_max'])
-        champion_preds = np.expm1(champion_preds_log)
-        champion_final_rmse = root_mean_squared_error(np.log1p(y_test_orig), champion_preds_log)
-        champion_final_mae = mean_absolute_error(np.log1p(y_test_orig), champion_preds_log)
+        champion_final_metrics = calculate_log_space_metrics(
+            final_training_bundle['y_eval_orig'],
+            champion_model.predict(X_test_scaled_champion)
+        )
         
     except Exception as e:
         print(f"[ERROR] Showdown evaluation failed: {str(e)}")
@@ -592,18 +824,20 @@ def build_master_arena():
         print(" System retaining existing Champion due to evaluation error.")
         return
 
-    print(f" -> Challenger ({challenger_name}) RMSE: {challenger_final_rmse:.4f} | MAE: {challenger_final_mae:.4f}")
-    print(f" -> Champion (v: {manifest.get('current_version')}) RMSE: {champion_final_rmse:.4f} | MAE: {champion_final_mae:.4f}")
+    print(
+        f" -> Champion (v: {manifest.get('current_version')}) RMSE: {champion_final_metrics['RMSE']:.4f} | "
+        f"MAE: {champion_final_metrics['MAE']:.4f} | R2: {champion_final_metrics['R2']:.4f}"
+    )
 
     # ---------------- Step 4: Atomic Deployment & Telemetry ----------------
     margin = GLOBAL_CONFIG['win_margin']
-    if challenger_final_rmse <= (champion_final_rmse - margin):
+    if challenger_final_metrics['RMSE'] <= (champion_final_metrics['RMSE'] - margin):
         print(f"\n[VICTORY] Challenger outperformed Champion by at least {margin}! Proceeding to deployment.")
         # 实时以最终评估成绩覆盖元数据
-        challenger_metadata['test_rmse'] = challenger_final_rmse
-        challenger_metadata['test_r2'] = r2_score(np.log1p(y_test_orig), challenger_preds_log)
-        challenger_metadata['test_mae'] = challenger_final_mae
-        deploy_new_champion(challenger_model, new_scaler, challenger_metadata)
+        challenger_metadata['test_rmse'] = challenger_final_metrics['RMSE']
+        challenger_metadata['test_r2'] = challenger_final_metrics['R2']
+        challenger_metadata['test_mae'] = challenger_final_metrics['MAE']
+        deploy_new_champion(challenger_model, final_training_bundle['scaler'], challenger_metadata)
     else:
         print(f"\n Challenger failed. System retaining existing Champion.")
 
